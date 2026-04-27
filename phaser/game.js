@@ -107,7 +107,7 @@ const ENEMY_TYPES = {
       landingExplosionRadius: 0,
       maxAmmo: 5,
       ammoCostPerShot: 1,
-      ammoRechargeSeconds: 0.6,
+      ammoRechargeSeconds: 0.75,
     },
     twin: {
       speedMultiplier: 0.65,
