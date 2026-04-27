@@ -15,6 +15,11 @@ const PLATFORM_UNDER = 0x2e363e;
 const ENEMY_COLOR = 0xdc4646;
 
 const DEFENSE_LINE_Y = HEIGHT - 120;
+const FAR_BATTLEFIELD_Y = 70;
+const FAR_BATTLEFIELD_WIDTH = 240;
+const NEAR_BATTLEFIELD_WIDTH = 360;
+const FAR_ENEMY_SCALE = 0.42;
+const NEAR_ENEMY_SCALE = 1.05;
 const ENEMY_SPAWN_MS = 1500;
 const ENEMY_SPAWN_MIN_MS = 650;
 const ENEMY_SPAWN_STEP_MS = 110;
@@ -123,7 +128,7 @@ const ENEMY_TYPES = {
       landingExplosionRadius: 0,
       maxAmmo: 3,
       ammoCostPerShot: 1,
-      ammoRechargeSeconds: 1.2,
+      ammoRechargeSeconds: 1.8,
     },
     bomb: {
       speedMultiplier: 0.45,
@@ -163,6 +168,36 @@ function distancePointToSegment(px, py, x1, y1, x2, y2) {
       x: x * cos - y * sin,
       y: x * sin + y * cos,
     };
+  }
+
+  function battlefieldProgress(y) {
+    return Phaser.Math.Clamp((y - FAR_BATTLEFIELD_Y) / (DEFENSE_LINE_Y - FAR_BATTLEFIELD_Y), 0, 1);
+  }
+
+  function battlefieldWidthAtY(y) {
+    return Phaser.Math.Linear(FAR_BATTLEFIELD_WIDTH, NEAR_BATTLEFIELD_WIDTH, battlefieldProgress(y));
+  }
+
+  function battlefieldBoundsAtY(y) {
+    const width = battlefieldWidthAtY(y);
+    const halfWidth = width / 2;
+    return {
+      left: WIDTH / 2 - halfWidth,
+      right: WIDTH / 2 + halfWidth,
+      width,
+    };
+  }
+
+  function battlefieldEdgePolygon(side) {
+    const farBounds = battlefieldBoundsAtY(FAR_BATTLEFIELD_Y);
+    const nearBounds = battlefieldBoundsAtY(DEFENSE_LINE_Y);
+    const outerOffset = side === 'left' ? -18 : 18;
+    return [
+      new Phaser.Geom.Point(side === 'left' ? 0 : WIDTH, 0),
+      new Phaser.Geom.Point(side === 'left' ? 0 : WIDTH, HEIGHT),
+      new Phaser.Geom.Point(nearBounds[side] + outerOffset, DEFENSE_LINE_Y),
+      new Phaser.Geom.Point(farBounds[side] + outerOffset, FAR_BATTLEFIELD_Y),
+    ];
   }
 
   function createWeaponAmmoState() {
@@ -216,16 +251,20 @@ function enemyTypeForLevel(level) {
   return 'normal';
 }
 
-class Enemy {
-  constructor(scene, typeName) {
-    this.scene = scene;
-    this.type = ENEMY_TYPES[typeName] || ENEMY_TYPES.normal;
-    this.baseX = Phaser.Math.Between(24, WIDTH - 24);
-    this.x = this.baseX;
-    this.y = -20;
-    this.speed = Phaser.Math.FloatBetween(ENEMY_MIN_SPEED, ENEMY_MAX_SPEED) * this.type.speedMultiplier;
-    this.phase = Phaser.Math.FloatBetween(0, Math.PI * 2);
-    this.driftSpeed = Phaser.Math.FloatBetween(1.2, 2.0);
+  class Enemy {
+    constructor(scene, typeName) {
+      this.scene = scene;
+      this.type = ENEMY_TYPES[typeName] || ENEMY_TYPES.normal;
+      const spawnBounds = battlefieldBoundsAtY(FAR_BATTLEFIELD_Y);
+      this.baseX = Phaser.Math.Between(
+        Math.ceil(spawnBounds.left + 18),
+        Math.floor(spawnBounds.right - 18),
+      );
+      this.x = this.baseX;
+      this.y = -20;
+      this.speed = Phaser.Math.FloatBetween(ENEMY_MIN_SPEED, ENEMY_MAX_SPEED) * this.type.speedMultiplier;
+      this.phase = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      this.driftSpeed = Phaser.Math.FloatBetween(1.2, 2.0);
     this.driftAmount = Phaser.Math.FloatBetween(10, 22);
     this.maxHp = this.type.hp;
     this.hp = this.maxHp;
@@ -233,59 +272,72 @@ class Enemy {
 
   progress() {
     return Phaser.Math.Clamp(this.y / DEFENSE_LINE_Y, 0, 1);
-  }
+    }
 
-  visualScale() {
-    return (0.45 + this.progress() * 0.9) * this.type.sizeMultiplier;
-  }
+    visualScale() {
+      const perspectiveScale = Phaser.Math.Linear(FAR_ENEMY_SCALE, NEAR_ENEMY_SCALE, this.progress());
+      return perspectiveScale * this.type.sizeMultiplier;
+    }
 
   displayedRadius() {
     return Math.max(8, Math.round(ENEMY_RADIUS * this.visualScale()));
   }
 
-  update(dt) {
-    const progress = this.progress();
-    const speedScale = (0.55 + progress * 1.35) * this.scene.levelSpeedMultiplier;
-    this.y += this.speed * speedScale * dt;
+    update(dt) {
+      const progress = this.progress();
+      const speedScale = (0.55 + progress * 1.35) * this.scene.levelSpeedMultiplier;
+      this.y += this.speed * speedScale * dt;
 
     const driftProgress = this.progress();
-    const drift = Math.sin((this.y * 0.018) + this.phase + dt * this.driftSpeed * 2.0) *
-      (this.driftAmount * (0.35 + driftProgress * 0.45));
-    this.x = this.baseX + drift;
+      const drift = Math.sin((this.y * 0.018) + this.phase + dt * this.driftSpeed * 2.0) *
+        (this.driftAmount * (0.35 + driftProgress * 0.45));
+      this.x = this.baseX + drift;
 
-    const radius = this.displayedRadius();
-    this.x = Phaser.Math.Clamp(this.x, radius, WIDTH - radius);
-  }
+      const radius = this.displayedRadius();
+      const bounds = battlefieldBoundsAtY(this.y);
+      this.x = Phaser.Math.Clamp(this.x, bounds.left + radius, bounds.right - radius);
+    }
 
   bottom() {
     return this.y + this.displayedRadius();
   }
 
-  draw(gfx) {
-    const radius = this.displayedRadius();
-    const progress = this.progress();
-    const bodyColor = this.type.color;
-    const bodyHeight = Math.max(radius * 2, ENEMY_HEIGHT * this.type.sizeMultiplier);
-    const bodyWidth = Math.max(radius * 1.4, radius * 2);
-    const bodyTop = this.y - bodyHeight / 2;
-    const bodyLeft = this.x - bodyWidth / 2;
-    const sideRadius = bodyWidth / 2;
-    const shadowScale = this.visualScale();
-    const shadowWidth = ENEMY_SHADOW_BASE_W + shadowScale * 18;
-    const shadowHeight = ENEMY_SHADOW_BASE_H + shadowScale * 6;
-    const shadowAlpha = ENEMY_SHADOW_MIN_ALPHA + shadowScale * (ENEMY_SHADOW_MAX_ALPHA - ENEMY_SHADOW_MIN_ALPHA);
-    const shadowAngle = Phaser.Math.DegToRad(ENEMY_SHADOW_ANGLE_DEG);
-    const shadowOffsetX = Math.cos(shadowAngle) * ENEMY_SHADOW_OFFSET * shadowScale;
-    const shadowOffsetY = Math.sin(shadowAngle) * ENEMY_SHADOW_OFFSET * shadowScale;
+    draw(gfx) {
+      const radius = this.displayedRadius();
+      const progress = this.progress();
+      const bodyColor = this.type.color;
+      const bodyHeight = Math.max(radius * 2, ENEMY_HEIGHT * this.type.sizeMultiplier);
+      const bodyWidth = Math.max(radius * 1.4, radius * 2);
+      const bodyTop = this.y - bodyHeight / 2;
+      const sideRadius = bodyWidth / 2;
+      const shadowScale = this.visualScale();
+      const shadowWidth = ENEMY_SHADOW_BASE_W + shadowScale * 22;
+      const shadowHeight = ENEMY_SHADOW_BASE_H + shadowScale * 10;
+      const shadowAlpha = ENEMY_SHADOW_MIN_ALPHA + shadowScale * (ENEMY_SHADOW_MAX_ALPHA - ENEMY_SHADOW_MIN_ALPHA);
+      const shadowAngle = Phaser.Math.DegToRad(ENEMY_SHADOW_ANGLE_DEG);
+      const shadowOffsetX = Math.cos(shadowAngle) * ENEMY_SHADOW_OFFSET * shadowScale;
+      const shadowOffsetY = Math.sin(shadowAngle) * ENEMY_SHADOW_OFFSET * shadowScale;
+      const bounds = battlefieldBoundsAtY(this.y);
+      const bodyCenterX = Phaser.Math.Clamp(this.x, bounds.left + radius, bounds.right - radius);
+      const bodyLeft = bodyCenterX - bodyWidth / 2;
+      const bodyRight = bodyCenterX + bodyWidth / 2;
+      const headHeight = Math.max(10, bodyHeight * 0.22);
+      const highlightHeight = Math.max(4, bodyHeight * 0.10);
 
-    gfx.fillStyle(SHADOW, shadowAlpha);
-    gfx.fillEllipse(this.x + shadowOffsetX, bodyTop + bodyHeight * 0.46 + shadowOffsetY, shadowWidth, shadowHeight);
-    gfx.fillStyle(bodyColor, 1);
-    gfx.fillRoundedRect(bodyLeft, bodyTop, bodyWidth, bodyHeight, sideRadius);
-    gfx.lineStyle(2, this.type.accent, 1);
-    gfx.strokeRoundedRect(bodyLeft, bodyTop, bodyWidth, bodyHeight, sideRadius);
+      gfx.fillStyle(SHADOW, shadowAlpha);
+      gfx.fillEllipse(bodyCenterX + shadowOffsetX, bodyTop + bodyHeight * 0.62 + shadowOffsetY, shadowWidth, shadowHeight);
+      gfx.fillStyle(bodyColor, 1);
+      gfx.fillRoundedRect(bodyLeft, bodyTop, bodyWidth, bodyHeight, sideRadius);
+      gfx.fillStyle(0xffffff, 0.12);
+      gfx.fillEllipse(bodyCenterX, bodyTop + headHeight * 0.75, bodyWidth * 0.62, headHeight);
+      gfx.fillStyle(0xffffff, 0.14);
+      gfx.fillRoundedRect(bodyLeft + bodyWidth * 0.14, bodyTop + bodyHeight * 0.12, bodyWidth * 0.72, highlightHeight, highlightHeight / 2);
+      gfx.lineStyle(2, this.type.accent, 1);
+      gfx.strokeRoundedRect(bodyLeft, bodyTop, bodyWidth, bodyHeight, sideRadius);
+      gfx.lineStyle(1, 0xffffff, 0.15);
+      gfx.lineBetween(bodyLeft + bodyWidth * 0.2, bodyTop + bodyHeight * 0.22, bodyRight - bodyWidth * 0.2, bodyTop + bodyHeight * 0.18);
+    }
   }
-}
 
 class Projectile {
   constructor(startX, startY, directionX, directionY, speed, weaponType) {
@@ -340,26 +392,52 @@ class Projectile {
     return this.groundX < -50 || this.groundX > WIDTH + 50 || this.groundY < -50 || this.groundY > HEIGHT + 50;
   }
 
-  draw(gfx) {
-    const { x, y } = this.visualPos();
-    const { x: gx, y: gy } = this.groundPos();
-    const shadowScale = Math.max(0.25, 1 - this.height / 220);
-    const shadowW = Math.max(8, Math.round(24 * shadowScale));
-    const shadowH = Math.max(4, Math.round(8 * shadowScale));
-    gfx.fillStyle(SHADOW, 0.7);
-    gfx.fillEllipse(gx, gy, shadowW, shadowH);
-    const fillColor = this.landed ? LANDED_PROJECTILE_FILL : CYAN;
-    const strokeColor = this.landed ? LANDED_PROJECTILE_STROKE : WHITE;
-    gfx.fillStyle(fillColor, 1);
-    gfx.fillCircle(x, y, this.radius);
-    gfx.lineStyle(2, strokeColor, 1);
-    gfx.strokeCircle(x, y, this.radius);
+    draw(gfx) {
+      const { x, y } = this.visualPos();
+      const { x: gx, y: gy } = this.groundPos();
+      const shadowScale = Math.max(0.25, 1 - this.height / 220);
+      const shadowW = Math.max(8, Math.round(24 * shadowScale));
+      const shadowH = Math.max(4, Math.round(8 * shadowScale));
+      gfx.fillStyle(SHADOW, 0.7);
+      gfx.fillEllipse(gx, gy, shadowW, shadowH);
+      if (this.weaponType === 'normal') {
+        const angle = Math.atan2(this.vy || (y - this.prevGroundY), this.vx || (x - this.prevGroundX));
+        const length = Math.max(12, this.radius * 3.2);
+        const width = Math.max(5, Math.round(this.radius * 0.85));
+        const tipX = x + Math.cos(angle) * length * 0.5;
+        const tipY = y + Math.sin(angle) * length * 0.5;
+        const tailX = x - Math.cos(angle) * length * 0.5;
+        const tailY = y - Math.sin(angle) * length * 0.5;
+        const leftAngle = angle + Math.PI / 2;
+        const rightAngle = angle - Math.PI / 2;
+        const finX = tailX - Math.cos(angle) * 4;
+        const finY = tailY - Math.sin(angle) * 4;
+        gfx.lineStyle(width, this.landed ? LANDED_PROJECTILE_STROKE : WHITE, 1);
+        gfx.lineBetween(tailX, tailY, tipX, tipY);
+        gfx.fillStyle(this.landed ? LANDED_PROJECTILE_FILL : CYAN, 1);
+        gfx.fillTriangle(
+          tipX, tipY,
+          tailX + Math.cos(leftAngle) * width, tailY + Math.sin(leftAngle) * width,
+          tailX + Math.cos(rightAngle) * width, tailY + Math.sin(rightAngle) * width,
+        );
+        gfx.fillStyle(0xffffff, this.landed ? 0.18 : 0.28);
+        gfx.fillCircle(tipX, tipY, Math.max(2, width * 0.34));
+        gfx.lineStyle(2, this.landed ? LANDED_PROJECTILE_STROKE : WHITE, 0.9);
+        gfx.lineBetween(finX, finY, tailX, tailY);
+      } else {
+        const fillColor = this.landed ? LANDED_PROJECTILE_FILL : CYAN;
+        const strokeColor = this.landed ? LANDED_PROJECTILE_STROKE : WHITE;
+        gfx.fillStyle(fillColor, 1);
+        gfx.fillCircle(x, y, this.radius);
+        gfx.lineStyle(2, strokeColor, 1);
+        gfx.strokeCircle(x, y, this.radius);
+      }
+    }
   }
-}
 
-class MainScene extends Phaser.Scene {
-  constructor() {
-    super('main');
+  class MainScene extends Phaser.Scene {
+    constructor() {
+      super('main');
     this.enemies = [];
     this.projectiles = [];
     this.landingEffects = [];
@@ -374,14 +452,21 @@ class MainScene extends Phaser.Scene {
       this.isAiming = false;
       this.aimStart = null;
       this.aimStartTime = 0;
-      this.lastFiredWeaponType = 'none';
-      this.lastSpawnedProjectileCount = 0;
-  }
+        this.lastFiredWeaponType = 'none';
+        this.lastSpawnedProjectileCount = 0;
+    }
+  
+    preload() {
+      this.load.image('background_arena', 'assets/background_arena.png');
+    }
 
-    create() {
-      this.cameras.main.setBackgroundColor(BG);
-      this.gfx = this.add.graphics();
-      this.hudGfx = this.add.graphics();
+      create() {
+        this.cameras.main.setBackgroundColor(BG);
+        this.backgroundImage = this.add.image(WIDTH / 2, HEIGHT / 2, 'background_arena')
+          .setDisplaySize(WIDTH, HEIGHT)
+          .setDepth(-1000);
+        this.gfx = this.add.graphics();
+        this.hudGfx = this.add.graphics();
       this.hudText = this.add.text(16, 14, 'Score: 0', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' });
       this.levelText = this.add.text(HUD_LEVEL_TEXT_X, HUD_LEVEL_TEXT_Y, 'Level: 1', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(0.5, 0);
       this.debugText = this.add.text(16, 48, '', { fontFamily: 'Arial', fontSize: '18px', color: '#f0f0f0' });
@@ -526,26 +611,10 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  drawTerrain() {
-    const g = this.gfx;
-    g.clear();
-    g.fillStyle(BG, 1);
-    g.fillRect(0, 0, WIDTH, HEIGHT);
-    g.fillStyle(LOW_GROUND, 1);
-    g.fillRect(0, 0, WIDTH, DEFENSE_LINE_Y - 28);
-    g.fillStyle(PLATFORM_UNDER, 1);
-    g.fillRect(0, DEFENSE_LINE_Y, WIDTH, 18);
-    g.fillStyle(HIGH_GROUND, 1);
-    g.fillRect(0, DEFENSE_LINE_Y + 18, WIDTH, HEIGHT - (DEFENSE_LINE_Y + 18));
-    g.lineStyle(4, PLATFORM_EDGE, 1);
-    g.lineBetween(0, DEFENSE_LINE_Y, WIDTH, DEFENSE_LINE_Y);
-    g.lineStyle(2, PLATFORM_UNDER, 1);
-    g.lineBetween(0, DEFENSE_LINE_Y + 4, WIDTH, DEFENSE_LINE_Y + 4);
-    g.lineStyle(1, MID_GROUND, 1);
-    for (let y = 50; y < DEFENSE_LINE_Y - 40; y += 70) {
-      g.lineBetween(0, y, WIDTH, y);
+    drawTerrain() {
+      const g = this.gfx;
+      g.clear();
     }
-  }
 
   update(time, delta) {
     const dt = delta / 1000;
@@ -682,4 +751,3 @@ const config = {
 };
 
 new Phaser.Game(config);
-
