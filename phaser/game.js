@@ -57,6 +57,13 @@ const HUD_LEVEL_TEXT_Y = 14;
 const LANDED_PROJECTILE_CAN_HIT_ENEMIES = false;
 const LANDED_PROJECTILE_FILL = 0xa8aeb5;
 const LANDED_PROJECTILE_STROKE = 0xd4d8dd;
+const HUD_AMMO_X = 16;
+const HUD_AMMO_Y = 90;
+const HUD_AMMO_BAR_WIDTH = 12;
+const HUD_AMMO_SEGMENT_HEIGHT = 12;
+const HUD_AMMO_SEGMENT_GAP = 4;
+const HUD_AMMO_BAR_GAP = 16;
+const HUD_AMMO_LABEL_COLOR = 0xf0f0f0;
 
 const ENEMY_TYPES = {
   normal: {
@@ -85,47 +92,56 @@ const ENEMY_TYPES = {
   },
 };
 
-const WEAPON_TYPES = {
-  normal: {
-    speedMultiplier: 1.0,
-    projectileRadius: 6,
-    straightHitRadius: 10,
+  const WEAPON_TYPES = {
+    normal: {
+      speedMultiplier: 1.0,
+      projectileRadius: 6,
+      straightHitRadius: 10,
     damage: 1,
     hasArc: true,
     arcInitialVerticalMultiplier: 0,
     arcGravity: 1000,
     arcMinUpwardSpeed: 220,
-    shotCount: 1,
-    spreadDeg: 0,
-    landingExplosionRadius: 0,
-  },
-  twin: {
-    speedMultiplier: 0.65,
-    projectileRadius: 7,
+      shotCount: 1,
+      spreadDeg: 0,
+      landingExplosionRadius: 0,
+      maxAmmo: 5,
+      ammoCostPerShot: 1,
+      ammoRechargeSeconds: 0.6,
+    },
+    twin: {
+      speedMultiplier: 0.65,
+      projectileRadius: 7,
     straightHitRadius: 10,
     damage: 1,
     hasArc: false,
     arcInitialVerticalMultiplier: 0,
     arcGravity: 0,
     arcMinUpwardSpeed: 0,
-    shotCount: 2,
-    spreadDeg: 10,
-    landingExplosionRadius: 0,
-  },
-  bomb: {
-    speedMultiplier: 0.45,
-    projectileRadius: 7,
+      shotCount: 2,
+      spreadDeg: 10,
+      landingExplosionRadius: 0,
+      maxAmmo: 3,
+      ammoCostPerShot: 1,
+      ammoRechargeSeconds: 1.2,
+    },
+    bomb: {
+      speedMultiplier: 0.45,
+      projectileRadius: 7,
     straightHitRadius: 8,
     damage: 2,
     hasArc: true,
     arcInitialVerticalMultiplier: 0.2,
     arcGravity: 1000,
     arcMinUpwardSpeed: 220,
-    shotCount: 1,
-    spreadDeg: 0,
-    landingExplosionRadius: 85,
-  },
-};
+      shotCount: 1,
+      spreadDeg: 0,
+      landingExplosionRadius: 85,
+      maxAmmo: 2,
+      ammoCostPerShot: 1,
+      ammoRechargeSeconds: 2.5,
+    },
+  };
 
 function distancePointToSegment(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1;
@@ -139,15 +155,29 @@ function distancePointToSegment(px, py, x1, y1, x2, y2) {
   return Phaser.Math.Distance.Between(px, py, cx, cy);
 }
 
-function rotateVector(x, y, degrees) {
-  const radians = Phaser.Math.DegToRad(degrees);
-  const cos = Math.cos(radians);
-  const sin = Math.sin(radians);
-  return {
-    x: x * cos - y * sin,
-    y: x * sin + y * cos,
-  };
-}
+  function rotateVector(x, y, degrees) {
+    const radians = Phaser.Math.DegToRad(degrees);
+    const cos = Math.cos(radians);
+    const sin = Math.sin(radians);
+    return {
+      x: x * cos - y * sin,
+      y: x * sin + y * cos,
+    };
+  }
+
+  function createWeaponAmmoState() {
+    const state = {};
+    for (const [weaponType, weapon] of Object.entries(WEAPON_TYPES)) {
+      state[weaponType] = {
+        maxAmmo: weapon.maxAmmo,
+        currentAmmo: weapon.maxAmmo,
+        ammoRechargeSeconds: weapon.ammoRechargeSeconds,
+        rechargeTimer: 0,
+        ammoCostPerShot: weapon.ammoCostPerShot,
+      };
+    }
+    return state;
+  }
 
 function spawnIntervalForLevel(level) {
   return Math.max(ENEMY_SPAWN_MIN_MS, ENEMY_SPAWN_MS - (level - 1) * ENEMY_SPAWN_STEP_MS);
@@ -338,22 +368,25 @@ class MainScene extends Phaser.Scene {
     this.gameOver = false;
     this.spawnTimer = 0;
     this.playTime = 0;
-    this.currentLevel = 1;
-    this.levelSpeedMultiplier = 1;
-    this.isAiming = false;
-    this.aimStart = null;
-    this.aimStartTime = 0;
-    this.lastFiredWeaponType = 'none';
-    this.lastSpawnedProjectileCount = 0;
+      this.currentLevel = 1;
+      this.levelSpeedMultiplier = 1;
+      this.weaponAmmo = createWeaponAmmoState();
+      this.isAiming = false;
+      this.aimStart = null;
+      this.aimStartTime = 0;
+      this.lastFiredWeaponType = 'none';
+      this.lastSpawnedProjectileCount = 0;
   }
 
-  create() {
-    this.cameras.main.setBackgroundColor(BG);
-    this.gfx = this.add.graphics();
-    this.hudText = this.add.text(16, 14, 'Score: 0', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' });
-    this.levelText = this.add.text(HUD_LEVEL_TEXT_X, HUD_LEVEL_TEXT_Y, 'Level: 1', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(0.5, 0);
-    this.debugText = this.add.text(16, 48, '', { fontFamily: 'Arial', fontSize: '18px', color: '#f0f0f0' });
-    this.hpText = this.add.text(WIDTH - 16, 14, 'HP: 5', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(1, 0);
+    create() {
+      this.cameras.main.setBackgroundColor(BG);
+      this.gfx = this.add.graphics();
+      this.hudGfx = this.add.graphics();
+      this.hudText = this.add.text(16, 14, 'Score: 0', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' });
+      this.levelText = this.add.text(HUD_LEVEL_TEXT_X, HUD_LEVEL_TEXT_Y, 'Level: 1', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(0.5, 0);
+      this.debugText = this.add.text(16, 48, '', { fontFamily: 'Arial', fontSize: '18px', color: '#f0f0f0' });
+      this.debugText.setVisible(false);
+      this.hpText = this.add.text(WIDTH - 16, 14, 'HP: 5', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(1, 0);
     this.gameOverText = this.add.text(WIDTH / 2, HEIGHT / 2 - 20, 'GAME OVER', { fontFamily: 'Arial', fontSize: '72px', color: '#f0f0f0' }).setOrigin(0.5);
     this.finalScoreText = this.add.text(WIDTH / 2, HEIGHT / 2 + 34, '', { fontFamily: 'Arial', fontSize: '42px', color: '#f0f0f0' }).setOrigin(0.5);
     this.gameOverText.setVisible(false);
@@ -388,18 +421,26 @@ class MainScene extends Phaser.Scene {
     });
   }
 
-  spawnWeaponProjectiles(startX, startY, directionX, directionY, gestureSpeed) {
-    const weapon = WEAPON_TYPES[CURRENT_WEAPON_TYPE] || WEAPON_TYPES.normal;
-    const baseSpeed = Phaser.Math.Clamp(
-      gestureSpeed * SPEED_MULTIPLIER * weapon.speedMultiplier,
-      MIN_HORIZONTAL_SPEED,
-      MAX_HORIZONTAL_SPEED,
-    );
-    let spawnedCount = 0;
+    spawnWeaponProjectiles(startX, startY, directionX, directionY, gestureSpeed) {
+      const weapon = WEAPON_TYPES[CURRENT_WEAPON_TYPE] || WEAPON_TYPES.normal;
+      const baseSpeed = Phaser.Math.Clamp(
+        gestureSpeed * SPEED_MULTIPLIER * weapon.speedMultiplier,
+        MIN_HORIZONTAL_SPEED,
+        MAX_HORIZONTAL_SPEED,
+      );
+      const ammo = this.weaponAmmo[CURRENT_WEAPON_TYPE];
+      if (!ammo || ammo.currentAmmo < ammo.ammoCostPerShot) {
+        this.lastFiredWeaponType = CURRENT_WEAPON_TYPE;
+        this.lastSpawnedProjectileCount = 0;
+        return;
+      }
+      ammo.currentAmmo -= ammo.ammoCostPerShot;
+      ammo.rechargeTimer = 0;
+      let spawnedCount = 0;
 
-    if (CURRENT_WEAPON_TYPE === 'twin') {
-      const left = rotateVector(directionX, directionY, -weapon.spreadDeg);
-      const right = rotateVector(directionX, directionY, weapon.spreadDeg);
+      if (CURRENT_WEAPON_TYPE === 'twin') {
+        const left = rotateVector(directionX, directionY, -weapon.spreadDeg);
+        const right = rotateVector(directionX, directionY, weapon.spreadDeg);
       this.projectiles.push(new Projectile(startX, startY, left.x, left.y, baseSpeed, CURRENT_WEAPON_TYPE));
       this.projectiles.push(new Projectile(startX, startY, right.x, right.y, baseSpeed, CURRENT_WEAPON_TYPE));
       spawnedCount = 2;
@@ -409,10 +450,53 @@ class MainScene extends Phaser.Scene {
     }
 
     this.projectiles.push(new Projectile(startX, startY, directionX, directionY, baseSpeed, CURRENT_WEAPON_TYPE));
-    spawnedCount = 1;
-    this.lastFiredWeaponType = CURRENT_WEAPON_TYPE;
-    this.lastSpawnedProjectileCount = spawnedCount;
-  }
+      spawnedCount = 1;
+      this.lastFiredWeaponType = CURRENT_WEAPON_TYPE;
+      this.lastSpawnedProjectileCount = spawnedCount;
+    }
+
+    updateWeaponAmmo(dt) {
+      for (const ammo of Object.values(this.weaponAmmo)) {
+        if (ammo.currentAmmo >= ammo.maxAmmo) {
+          ammo.rechargeTimer = 0;
+          continue;
+        }
+        ammo.rechargeTimer += dt;
+        while (ammo.currentAmmo < ammo.maxAmmo && ammo.rechargeTimer >= ammo.ammoRechargeSeconds) {
+          ammo.rechargeTimer -= ammo.ammoRechargeSeconds;
+          ammo.currentAmmo += 1;
+        }
+      }
+    }
+
+    drawAmmoHud() {
+      const g = this.hudGfx;
+      g.clear();
+
+      const colors = {
+        normal: { fill: 0x5bc0ff, outline: 0xd9f2ff },
+        twin: { fill: 0x9ef06d, outline: 0xe2ffd3 },
+        bomb: { fill: 0xffb14d, outline: 0xffe1b5 },
+      };
+      const weaponType = CURRENT_WEAPON_TYPE;
+      const weapon = WEAPON_TYPES[weaponType];
+      const ammo = this.weaponAmmo[weaponType];
+      if (!weapon || !ammo) return;
+
+      const x = HUD_AMMO_X;
+      const baseY = HUD_AMMO_Y;
+      g.lineStyle(1, HUD_AMMO_LABEL_COLOR, 0.8);
+
+      for (let segment = 0; segment < weapon.maxAmmo; segment += 1) {
+        const y = baseY + (weapon.maxAmmo - 1 - segment) * (HUD_AMMO_SEGMENT_HEIGHT + HUD_AMMO_SEGMENT_GAP);
+        const filled = segment < ammo.currentAmmo;
+        const fillColor = filled ? colors[weaponType].fill : 0x2a2f36;
+        const alpha = filled ? 1 : 0.25;
+        g.fillStyle(fillColor, alpha);
+        g.fillRoundedRect(x, y, HUD_AMMO_BAR_WIDTH, HUD_AMMO_SEGMENT_HEIGHT, 3);
+        g.strokeRoundedRect(x, y, HUD_AMMO_BAR_WIDTH, HUD_AMMO_SEGMENT_HEIGHT, 3);
+      }
+    }
 
   applyDamageToEnemy(enemyIndex, damage) {
     const enemy = this.enemies[enemyIndex];
@@ -466,15 +550,16 @@ class MainScene extends Phaser.Scene {
   update(time, delta) {
     const dt = delta / 1000;
 
-    if (!this.gameOver) {
-      this.playTime += dt;
-      this.currentLevel = 1 + Math.floor(this.playTime / LEVEL_UP_INTERVAL_SEC);
-      this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
+      if (!this.gameOver) {
+        this.playTime += dt;
+        this.currentLevel = 1 + Math.floor(this.playTime / LEVEL_UP_INTERVAL_SEC);
+        this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
+        this.updateWeaponAmmo(dt);
 
-      this.spawnTimer += delta;
-      const spawnInterval = spawnIntervalForLevel(this.currentLevel);
-      while (this.spawnTimer >= spawnInterval) {
-        this.spawnTimer -= spawnInterval;
+        this.spawnTimer += delta;
+        const spawnInterval = spawnIntervalForLevel(this.currentLevel);
+        while (this.spawnTimer >= spawnInterval) {
+          this.spawnTimer -= spawnInterval;
         this.enemies.push(new Enemy(this, enemyTypeForLevel(this.currentLevel)));
       }
 
@@ -554,10 +639,10 @@ class MainScene extends Phaser.Scene {
       }
     }
 
-    this.drawTerrain();
+      this.drawTerrain();
 
-    for (const enemy of this.enemies) {
-      enemy.draw(this.gfx);
+      for (const enemy of this.enemies) {
+        enemy.draw(this.gfx);
     }
 
     for (const effect of this.landingEffects) {
@@ -568,21 +653,16 @@ class MainScene extends Phaser.Scene {
       this.gfx.strokeCircle(effect.x, effect.y, radius);
     }
 
-    for (const projectile of this.projectiles) {
-      projectile.draw(this.gfx);
-    }
+      for (const projectile of this.projectiles) {
+        projectile.draw(this.gfx);
+      }
 
-    this.hudText.setText(`Score: ${this.score}`);
-    this.levelText.setText(`Level: ${this.currentLevel}`);
-    this.debugText.setText(
-      `Weapon: ${CURRENT_WEAPON_TYPE}\n` +
-      `Projectiles: ${this.projectiles.length}\n` +
-      `Last fired: ${this.lastFiredWeaponType}\n` +
-      `Last spawned: ${this.lastSpawnedProjectileCount}`,
-    );
-    this.hpText.setText(`HP: ${this.hp}`);
+      this.drawAmmoHud();
+      this.hudText.setText(`Score: ${this.score}`);
+      this.levelText.setText(`Level: ${this.currentLevel}`);
+      this.hpText.setText(`HP: ${this.hp}`);
+    }
   }
-}
 
 const config = {
   type: Phaser.AUTO,
@@ -602,3 +682,4 @@ const config = {
 };
 
 new Phaser.Game(config);
+
