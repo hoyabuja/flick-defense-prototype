@@ -1,6 +1,6 @@
+import asyncio
 import math
 import random
-import sys
 
 import pygame
 
@@ -221,7 +221,7 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
-                sys.exit()
+                return
 
             if game_over:
                 continue
@@ -359,7 +359,8 @@ def main():
             )
 
         pygame.display.flip()
+        await asyncio.sleep(0)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
