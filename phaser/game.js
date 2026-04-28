@@ -123,7 +123,7 @@ function speedMultiplierForLevel(level) {
       );
       this.x = this.baseX;
       this.y = -20;
-      this.speed = Phaser.Math.FloatBetween(ENEMY_MIN_SPEED, ENEMY_MAX_SPEED) * this.type.speedMultiplier;
+      this.speed = Phaser.Math.FloatBetween(ENEMY_MIN_SPEED, ENEMY_MAX_SPEED) * this.type.speedMultiplier * (this.scene.debugSpeedMultiplier || 1.0);
       this.maxHp = this.type.hp;
       this.hp = this.maxHp;
       this.pathMode = this.type.label === 'zigzag'
@@ -232,7 +232,14 @@ function speedMultiplierForLevel(level) {
           this.hopScaleX = mv.squashScaleX;
           this.hopScaleY = mv.squashScaleY;
           this.hopPause = Phaser.Math.FloatBetween(mv.landingPauseMin, mv.landingPauseMax);
-          if (this.hopTimer >= this.hopPause) { this.hopTimer = 0; this.hopScaleX = 1; this.hopScaleY = 1; this.hopState = 'CHARGING'; }
+          if (this.hopTimer >= this.hopPause) {
+            this.hopTimer = 0;
+            this.hopScaleX = 1;
+            this.hopScaleY = 1;
+            this.hopState = 'CHARGING';
+            // 落地攻擊晶核
+            if (!this.scene.debugGodMode) this.scene.hp -= 1;
+          }
         }
       }
     }
@@ -337,44 +344,72 @@ function speedMultiplierForLevel(level) {
     return this.y + this.displayedRadius();
   }
 
-    getSlimeSpriteKey() {
-      if (this.isDead) return 'slime_death';
-      if (this.hitStunTimer > 0) return 'slime_hit';
-      if (this.hopState === 'AIRBORNE') return 'slime_hop';
-      return 'slime_idle';
+    getSpritePrefix() {
+      if (this.type.label === 'tank') return 'shroom';
+      return 'slime';
+    }
+
+    getAnimKey() {
+      // slime 用 atlas 動畫
+      if (this.getSpritePrefix() === 'slime') {
+        if (this.isDead) return 'slime_death';
+        if (this.hitStunTimer > 0) return 'slime_hit';
+        if (this.hopState === 'AIRBORNE') return 'slime_hop';
+        return 'slime_idle';
+      }
+      // shroom 用舊圖片 key
+      if (this.isDead) return 'shroom_death';
+      if (this.hitStunTimer > 0) return 'shroom_hit';
+      if (this.hopState === 'AIRBORNE') return 'shroom_hop';
+      return 'shroom_idle';
+    }
+
+    isSlimeAtlas() {
+      return this.getSpritePrefix() === 'slime' && this.scene.textures.exists('slime');
     }
 
     draw(gfx) {
       const radius = this.displayedRadius();
-      const progress = this.progress();
-      const bodyColor = this.type.color;
       const bodySize = Math.max(this.type.bodySize, radius * 2.0);
       const scaleX = this.hopScaleX || 1;
       const scaleY = this.hopScaleY || 1;
       const visualY = this.y + (this.hopVisualOffsetY || 0);
-      const bodyWidth = bodySize * 1.04 * scaleX;
-      const bodyHeight = bodySize * 0.94 * scaleY;
-      const bodyTop = visualY - bodyHeight / 2;
+      const displaySize = bodySize * 1.8 * this.visualScale();
 
-      // slime sprite 顯示
       const mv = this.type.movement;
-      if (mv && mv.movementType === 'hop' && this.scene.textures.exists('slime_idle')) {
-        const spriteKey = this.getSlimeSpriteKey();
+      if (mv && mv.movementType === 'hop' && (this.isSlimeAtlas() || this.scene.textures.exists(this.getSpritePrefix() + '_idle'))) {
+        const animKey = this.getAnimKey();
+
         if (!this.slimeSprite) {
-          this.slimeSprite = this.scene.add.image(this.x, visualY, spriteKey).setDepth(10);
+          if (this.isSlimeAtlas()) {
+            // atlas sprite
+            this.slimeSprite = this.scene.add.sprite(this.x, visualY, 'slime', 'idle').setDepth(10);
+          } else {
+            // 舊圖片 image
+            this.slimeSprite = this.scene.add.image(this.x, visualY, animKey).setDepth(10);
+          }
         }
-        const displaySize = bodySize * 1.8 * this.visualScale();
-        this.slimeSprite.setTexture(spriteKey);
+
+        if (this.isSlimeAtlas()) {
+          // 播動畫（只在動畫 key 改變時重新 play）
+          if (this.slimeSprite.anims.currentAnim?.key !== animKey) {
+            this.slimeSprite.play(animKey);
+          }
+        } else {
+          this.slimeSprite.setTexture(animKey);
+        }
+
         this.slimeSprite.setPosition(this.x, visualY);
         this.slimeSprite.setDisplaySize(displaySize * scaleX, displaySize * scaleY);
-        this.slimeSprite.setDepth(10);
+        this.slimeSprite.setDepth(10 + this.y);
+
         // 影子
         const shadowScale = this.visualScale();
         const shadowWidth = ENEMY_SHADOW_BASE_W + shadowScale * 22;
         const shadowHeight = ENEMY_SHADOW_BASE_H + shadowScale * 10;
         const shadowAlpha = ENEMY_SHADOW_MIN_ALPHA + shadowScale * (ENEMY_SHADOW_MAX_ALPHA - ENEMY_SHADOW_MIN_ALPHA);
         gfx.fillStyle(SHADOW, shadowAlpha);
-        gfx.fillEllipse(this.x, this.y + bodySize * 0.5, shadowWidth, shadowHeight);
+        gfx.fillEllipse(this.x, this.y + bodySize * 0.1, shadowWidth, shadowHeight);
 
         // 禁區發光
         if (this.y >= DANGER_ZONE_TOP_Y && !this.isDead) {
@@ -433,6 +468,7 @@ function speedMultiplierForLevel(level) {
     this.height = 0;
     this.landed = false;
     this.landedHitApplied = false;
+    this.hasHit = false;
       this.vx = directionX * speed * HORIZONTAL_SPEED_MULTIPLIER;
       this.vy = directionY * speed * HORIZONTAL_SPEED_MULTIPLIER;
       this.vz = this.weapon.hasArc ? Math.max(this.weapon.arcMinUpwardSpeed, speed * this.weapon.arcInitialVerticalMultiplier) : 0;
@@ -571,14 +607,38 @@ function speedMultiplierForLevel(level) {
         this.lastSpawnedProjectileCount = 0;
         this.slashCooldown = 0;
         this.slashEffects = [];
+        this.debugSpawnMultiplier = 1.0;
+        this.debugSpeedMultiplier = 1.0;
+        this.debugGodMode = false;
+        this.debugAllowedTypes = null; // null = 全部，array = 只生成指定類型
+        // Wave / level system
+        this.enemiesSpawnedThisLevel = 0;
+        this.enemiesToSpawnThisLevel = ENEMIES_PER_LEVEL_BASE;
+        this.isLevelClear = false;
+        // Card system
+        this.isCardPicking = false;
+        this.cardHpCount = 0;
+        this.bombRadiusMultiplier = 1;
+        this.unlockedWeapons = { normal: true, twin: false, bomb: false };
+        this.cardUiElements = [];
+        // Weapon switch
+        this.currentWeaponType = 'normal';
+        // Bomb explosions
+        this.bombExplosionEffects = [];
+        // Hit gauge
+        this.hitGauge = 0;
+        this.hitGaugeCardCount = 0; // 已觸發幾次抽卡
     }
   
     preload() {
       this.load.image('background_arena', 'assets/background_arena.png');
-      this.load.image('slime_idle', 'assets/slime1.png');
-      this.load.image('slime_hop', 'assets/slime2.png');
-      this.load.image('slime_hit', 'assets/slime3.png');
-      this.load.image('slime_death', 'assets/slime4.png');
+      // slime: atlas 動畫
+      this.load.atlas('slime', 'assets/slime1sheet.png', 'assets/slime1sheet.json');
+      // shroom: 暫時保留舊圖片
+      this.load.image('shroom_idle', 'assets/shroom1.png');
+      this.load.image('shroom_hop', 'assets/shroom2.png');
+      this.load.image('shroom_hit', 'assets/shroom3.png');
+      this.load.image('shroom_death', 'assets/shroom4.png');
       for (const visual of Object.values(WEAPON_VISUAL_CONFIG)) {
         this.load.image(visual.assetKey, visual.assetPath);
       }
@@ -593,6 +653,12 @@ function speedMultiplierForLevel(level) {
         this.gfx.setDepth(0);
         this.hudGfx = this.add.graphics();
         this.hudGfx.setDepth(60);
+
+        // Slime 動畫註冊
+        this.anims.create({ key: 'slime_idle', frames: [{ key: 'slime', frame: 'idle' }], frameRate: 1, repeat: -1 });
+        this.anims.create({ key: 'slime_hop', frames: this.anims.generateFrameNames('slime', { frames: ['move_01 crouch', 'move_02 jump', 'move_03 landing', 'move_04 recovery'] }), frameRate: 10, repeat: -1 });
+        this.anims.create({ key: 'slime_hit', frames: this.anims.generateFrameNames('slime', { frames: ['hit_01', 'hit_02'] }), frameRate: 8, repeat: 0 });
+        this.anims.create({ key: 'slime_death', frames: this.anims.generateFrameNames('slime', { frames: ['death_01', 'death_02', 'death_03', 'death_04'] }), frameRate: 6, repeat: 0 });
       this.hudText = this.add.text(16, 14, 'Score: 0', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setDepth(70);
       this.levelText = this.add.text(HUD_LEVEL_TEXT_X, HUD_LEVEL_TEXT_Y, 'Level: 1', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(0.5, 0).setDepth(70);
       this.debugText = this.add.text(16, 48, '', { fontFamily: 'Arial', fontSize: '18px', color: '#f0f0f0' }).setDepth(70);
@@ -603,15 +669,45 @@ function speedMultiplierForLevel(level) {
     this.gameOverText.setVisible(false);
     this.finalScoreText.setVisible(false);
 
+    // 武器切換按鈕
+    this.weaponSwitchBtn = this.add.text(HUD_AMMO_X, HUD_AMMO_Y + 200, '主武器', {
+      fontFamily: 'Arial', fontSize: '16px', color: '#5bc0ff',
+      backgroundColor: '#1a2a3a', padding: { x: 8, y: 6 },
+    }).setDepth(70).setInteractive({ useHandCursor: true });
+    this.weaponSwitchBtn.on('pointerup', () => { this.cycleWeapon(); });
+    this.updateWeaponSwitchBtn();
+
+    // 命中條 HUD（左下角）
+    this.hitGaugeGfx = this.add.graphics().setDepth(70);
+    this.hitGaugeLabel = this.add.text(HUD_AMMO_X, HEIGHT - 60, 'GAUGE', {
+      fontFamily: 'Arial', fontSize: '13px', color: '#aaddff',
+    }).setDepth(70);
+
+    // Level clear UI
+    this.levelClearOverlay = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x000000, 0.55).setDepth(90).setVisible(false);
+    this.levelClearText = this.add.text(WIDTH / 2, HEIGHT / 2 - 60, 'CLEAR', {
+      fontFamily: 'Arial', fontSize: '96px', color: '#ffe066', stroke: '#000000', strokeThickness: 6,
+    }).setOrigin(0.5).setDepth(91).setVisible(false);
+    this.levelClearBtn = this.add.text(WIDTH / 2, HEIGHT / 2 + 60, '繼續', {
+      fontFamily: 'Arial', fontSize: '48px', color: '#f0f0f0',
+      backgroundColor: '#2e6adf', padding: { x: 36, y: 16 },
+    }).setOrigin(0.5).setDepth(91).setVisible(false).setInteractive({ useHandCursor: true });
+    this.levelClearBtn.on('pointerup', () => {
+      this.levelClearOverlay.setVisible(false);
+      this.levelClearText.setVisible(false);
+      this.levelClearBtn.setVisible(false);
+      this.startNextLevel();
+    });
+
     this.input.on('pointerdown', (pointer) => {
-      if (this.gameOver) return;
+      if (this.gameOver || this.isLevelClear || this.isCardPicking) return;
       this.isAiming = true;
       this.aimStart = { x: pointer.x, y: pointer.y };
       this.aimStartTime = this.time.now / 1000;
     });
 
     this.input.on('pointerup', (pointer) => {
-      if (this.gameOver || !this.isAiming || !this.aimStart) return;
+      if (this.gameOver || this.isLevelClear || this.isCardPicking || !this.isAiming || !this.aimStart) return;
       this.isAiming = false;
       const aimEnd = { x: pointer.x, y: pointer.y };
       const dx = aimEnd.x - this.aimStart.x;
@@ -644,6 +740,141 @@ function speedMultiplierForLevel(level) {
     });
   }
 
+    showCardPicker() {
+      this.isCardPicking = true;
+
+      const available = CARD_POOL.filter(card =>
+        !card.canPick || card.canPick(this)
+      );
+      const shuffled = available.sort(() => Math.random() - 0.5);
+      const choices = shuffled.slice(0, 3);
+
+      const els = [];
+
+      // 遮罩放最頂端
+      const overlay = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x000000, 0.82).setDepth(200).setInteractive();
+      els.push(overlay);
+
+      const title = this.add.text(WIDTH / 2, 120, '選擇升級', {
+        fontFamily: 'Arial', fontSize: '40px', color: '#ffe066',
+        stroke: '#000000', strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(201);
+      els.push(title);
+
+      const cardW = 300;
+      const cardH = 110;
+      const startY = 230;
+      const gap = 130;
+
+      choices.forEach((card, i) => {
+        const cy = startY + i * gap;
+
+        const bg = this.add.rectangle(WIDTH / 2, cy, cardW, cardH, 0x1a2a4a, 1)
+          .setDepth(201).setStrokeStyle(2, 0x5ad2f0).setInteractive({ useHandCursor: true });
+
+        const labelText = this.add.text(WIDTH / 2, cy - 18, card.label, {
+          fontFamily: 'Arial', fontSize: '26px', color: '#f0f0f0',
+        }).setOrigin(0.5).setDepth(202);
+
+        const descText = this.add.text(WIDTH / 2, cy + 22, card.desc, {
+          fontFamily: 'Arial', fontSize: '20px', color: '#aac8e0',
+        }).setOrigin(0.5).setDepth(202);
+
+        bg.on('pointerover', () => bg.setFillStyle(0x2e4a7a));
+        bg.on('pointerout', () => bg.setFillStyle(0x1a2a4a));
+        bg.on('pointerup', () => {
+          card.apply(this);
+          this.updateWeaponSwitchBtn();
+          this.dismissCardPicker();
+        });
+
+        els.push(bg, labelText, descText);
+      });
+
+      this.cardUiElements = els;
+    }
+
+    dismissCardPicker() {
+      for (const el of this.cardUiElements) { el.destroy(); }
+      this.cardUiElements = [];
+      this.isCardPicking = false;
+      // 不再呼叫 startNextLevel，卡片與關卡進度無關
+    }
+
+    // Debug 用：直接套用指定卡片
+    applyCardById(cardId) {
+      const card = CARD_POOL.find(c => c.id === cardId);
+      if (!card) return;
+      if (card.canPick && !card.canPick(this)) return;
+      card.apply(this);
+      this.updateWeaponSwitchBtn();
+    }
+
+    // Debug 用：關卡前進
+    debugLevelAdvance() {
+      this.isLevelClear = false;
+      this.isCardPicking = false;
+      for (const el of this.cardUiElements) { el.destroy(); }
+      this.cardUiElements = [];
+      this.levelClearOverlay.setVisible(false);
+      this.levelClearText.setVisible(false);
+      this.levelClearBtn.setVisible(false);
+      for (const enemy of this.enemies) {
+        if (enemy.slimeSprite) { enemy.slimeSprite.destroy(); enemy.slimeSprite = null; }
+      }
+      this.enemies = [];
+      this.currentLevel += 1;
+      this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
+      this.enemiesToSpawnThisLevel = ENEMIES_PER_LEVEL_BASE + (this.currentLevel - 1) * ENEMIES_PER_LEVEL_STEP;
+      this.enemiesSpawnedThisLevel = 0;
+      this.spawnTimer = 0;
+    }
+
+    // Debug 用：關卡後退
+    debugLevelRetreat() {
+      if (this.currentLevel <= 1) return;
+      this.isLevelClear = false;
+      this.isCardPicking = false;
+      for (const el of this.cardUiElements) { el.destroy(); }
+      this.cardUiElements = [];
+      this.levelClearOverlay.setVisible(false);
+      this.levelClearText.setVisible(false);
+      this.levelClearBtn.setVisible(false);
+      for (const enemy of this.enemies) {
+        if (enemy.slimeSprite) { enemy.slimeSprite.destroy(); enemy.slimeSprite = null; }
+      }
+      this.enemies = [];
+      this.currentLevel -= 1;
+      this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
+      this.enemiesToSpawnThisLevel = ENEMIES_PER_LEVEL_BASE + (this.currentLevel - 1) * ENEMIES_PER_LEVEL_STEP;
+      this.enemiesSpawnedThisLevel = 0;
+      this.spawnTimer = 0;
+    }
+
+    triggerLevelClear() {
+      this.isLevelClear = true;
+      this.levelClearOverlay.setVisible(true);
+      this.levelClearText.setVisible(true);
+      this.levelClearBtn.setVisible(true);
+    }
+
+    startNextLevel() {
+      this.currentLevel += 1;
+      this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
+      this.enemiesToSpawnThisLevel = ENEMIES_PER_LEVEL_BASE + (this.currentLevel - 1) * ENEMIES_PER_LEVEL_STEP;
+      this.enemiesSpawnedThisLevel = 0;
+      this.isLevelClear = false;
+      this.spawnTimer = 0;
+      // 清掉畫面上剩餘怪物
+      for (const enemy of this.enemies) {
+        if (enemy.slimeSprite) { enemy.slimeSprite.destroy(); enemy.slimeSprite = null; }
+      }
+      this.enemies = [];
+      this.levelClearOverlay.setVisible(false);
+      this.levelClearText.setVisible(false);
+      this.levelClearBtn.setVisible(false);
+    }
+
     applySlash(x1, y1, x2, y2) {
       if (this.slashCooldown > 0) return;
 
@@ -672,15 +903,16 @@ function speedMultiplierForLevel(level) {
     }
 
     spawnWeaponProjectiles(startX, startY, directionX, directionY, gestureSpeed, isPerfectRelease) {
-      const weapon = WEAPON_TYPES[CURRENT_WEAPON_TYPE] || WEAPON_TYPES.normal;
+      const wtype = this.currentWeaponType;
+      const weapon = WEAPON_TYPES[wtype] || WEAPON_TYPES.normal;
       const baseSpeed = Phaser.Math.Clamp(
         gestureSpeed * SPEED_MULTIPLIER * weapon.speedMultiplier,
         MIN_HORIZONTAL_SPEED,
         MAX_HORIZONTAL_SPEED,
       );
-      const ammo = this.weaponAmmo[CURRENT_WEAPON_TYPE];
+      const ammo = this.weaponAmmo[wtype];
       if (!ammo || ammo.currentAmmo < ammo.ammoCostPerShot) {
-        this.lastFiredWeaponType = CURRENT_WEAPON_TYPE;
+        this.lastFiredWeaponType = wtype;
         this.lastSpawnedProjectileCount = 0;
         return;
       }
@@ -688,26 +920,26 @@ function speedMultiplierForLevel(level) {
       ammo.rechargeTimer = 0;
       let spawnedCount = 0;
 
-      if (CURRENT_WEAPON_TYPE === 'twin') {
+      if (wtype === 'twin') {
         const left = rotateVector(directionX, directionY, -weapon.spreadDeg);
         const right = rotateVector(directionX, directionY, weapon.spreadDeg);
-        const leftProjectile = new Projectile(this, startX, startY, left.x, left.y, baseSpeed, CURRENT_WEAPON_TYPE);
-        const rightProjectile = new Projectile(this, startX, startY, right.x, right.y, baseSpeed, CURRENT_WEAPON_TYPE);
+        const leftProjectile = new Projectile(this, startX, startY, left.x, left.y, baseSpeed, wtype);
+        const rightProjectile = new Projectile(this, startX, startY, right.x, right.y, baseSpeed, wtype);
         leftProjectile.perfect = isPerfectRelease;
         rightProjectile.perfect = isPerfectRelease;
         this.projectiles.push(leftProjectile);
         this.projectiles.push(rightProjectile);
       spawnedCount = 2;
-      this.lastFiredWeaponType = CURRENT_WEAPON_TYPE;
+      this.lastFiredWeaponType = wtype;
       this.lastSpawnedProjectileCount = spawnedCount;
       return;
     }
 
-      const projectile = new Projectile(this, startX, startY, directionX, directionY, baseSpeed, CURRENT_WEAPON_TYPE);
+      const projectile = new Projectile(this, startX, startY, directionX, directionY, baseSpeed, wtype);
       projectile.perfect = isPerfectRelease;
       this.projectiles.push(projectile);
       spawnedCount = 1;
-      this.lastFiredWeaponType = CURRENT_WEAPON_TYPE;
+      this.lastFiredWeaponType = wtype;
       this.lastSpawnedProjectileCount = spawnedCount;
     }
 
@@ -734,7 +966,7 @@ function speedMultiplierForLevel(level) {
         twin: { fill: 0x9ef06d, outline: 0xe2ffd3 },
         bomb: { fill: 0xffb14d, outline: 0xffe1b5 },
       };
-      const weaponType = CURRENT_WEAPON_TYPE;
+      const weaponType = this.currentWeaponType;
       const weapon = WEAPON_TYPES[weaponType];
       const ammo = this.weaponAmmo[weaponType];
       if (!weapon || !ammo) return;
@@ -743,8 +975,8 @@ function speedMultiplierForLevel(level) {
       const baseY = HUD_AMMO_Y;
       g.lineStyle(1, HUD_AMMO_LABEL_COLOR, 0.8);
 
-      for (let segment = 0; segment < weapon.maxAmmo; segment += 1) {
-        const y = baseY + (weapon.maxAmmo - 1 - segment) * (HUD_AMMO_SEGMENT_HEIGHT + HUD_AMMO_SEGMENT_GAP);
+      for (let segment = 0; segment < ammo.maxAmmo; segment += 1) {
+        const y = baseY + (ammo.maxAmmo - 1 - segment) * (HUD_AMMO_SEGMENT_HEIGHT + HUD_AMMO_SEGMENT_GAP);
         const filled = segment < ammo.currentAmmo;
         const fillColor = filled ? colors[weaponType].fill : 0x2a2f36;
         const alpha = filled ? 1 : 0.25;
@@ -754,11 +986,68 @@ function speedMultiplierForLevel(level) {
       }
     }
 
+    addHitGauge(value) {
+      const threshold = hitGaugeThreshold(this.hitGaugeCardCount);
+      this.hitGauge = Math.max(HIT_GAUGE_MIN, Math.min(this.hitGauge + value, threshold));
+      if (this.hitGauge >= threshold) {
+        this.hitGauge = 0;
+        this.hitGaugeCardCount += 1;
+        this.showCardPicker();
+      }
+    }
+
+    drawHitGauge() {
+      const g = this.hitGaugeGfx;
+      g.clear();
+      const threshold = hitGaugeThreshold(this.hitGaugeCardCount);
+      const progress = Math.min(this.hitGauge / threshold, 1);
+      const barW = 80;
+      const barH = 10;
+      const x = HUD_AMMO_X;
+      const y = HEIGHT - 44;
+      // 背景
+      g.fillStyle(0x2a2f36, 0.85);
+      g.fillRoundedRect(x, y, barW, barH, 4);
+      // 填充
+      if (progress > 0) {
+        const fillColor = progress >= 0.8 ? 0xffe066 : 0x5ad2f0;
+        g.fillStyle(fillColor, 1);
+        g.fillRoundedRect(x, y, Math.round(barW * progress), barH, 4);
+      }
+      // 外框
+      g.lineStyle(1, 0xaaddff, 0.5);
+      g.strokeRoundedRect(x, y, barW, barH, 4);
+      // 數字
+      this.hitGaugeLabel.setText(`${Math.floor(this.hitGauge)} / ${threshold}`);
+    }
+
+    cycleWeapon() {
+      const order = ['normal', 'twin', 'bomb'];
+      const unlocked = order.filter(w => this.unlockedWeapons[w]);
+      if (unlocked.length <= 1) return;
+      const idx = unlocked.indexOf(this.currentWeaponType);
+      this.currentWeaponType = unlocked[(idx + 1) % unlocked.length];
+      this.updateWeaponSwitchBtn();
+    }
+
+    updateWeaponSwitchBtn() {
+      const labels = { normal: '主武器', twin: 'Twin', bomb: 'Bomb' };
+      const colors = { normal: '#5bc0ff', twin: '#9ef06d', bomb: '#ffb14d' };
+      const w = this.currentWeaponType;
+      this.weaponSwitchBtn.setText(labels[w] || w);
+      this.weaponSwitchBtn.setStyle({ color: colors[w] || '#ffffff' });
+      // 只有解鎖超過 1 種武器時才顯示按鈕
+      const unlockedCount = Object.values(this.unlockedWeapons).filter(Boolean).length;
+      this.weaponSwitchBtn.setVisible(unlockedCount > 1);
+    }
+
     applyDamageToEnemy(enemyIndex, damage, isPerfect = false) {
       const enemy = this.enemies[enemyIndex];
       if (!enemy) {
         return false;
       }
+      // 命中 +1
+      this.addHitGauge(HIT_GAUGE_HIT_VALUE);
       enemy.hp -= damage;
       if (enemy.hp <= 0) {
         if (isPerfect) {
@@ -777,10 +1066,12 @@ function speedMultiplierForLevel(level) {
     }
 
     applyBombDamage(cx, cy, radius, damage, isPerfect = false) {
+      const effectiveRadius = radius * (this.bombRadiusMultiplier || 1);
       for (let i = this.enemies.length - 1; i >= 0; i -= 1) {
         const enemy = this.enemies[i];
-        const hitRadius = radius + enemy.displayedRadius();
+        const hitRadius = effectiveRadius + enemy.displayedRadius();
         if (Phaser.Math.Distance.Between(enemy.x, enemy.y, cx, cy) <= hitRadius) {
+          this.addHitGauge(HIT_GAUGE_HIT_VALUE);
           enemy.hp -= damage;
           if (isPerfect) {
             this.spawnPerfectPopup(enemy.x, enemy.y);
@@ -828,19 +1119,36 @@ function speedMultiplierForLevel(level) {
 
       if (!this.gameOver) {
         this.playTime += dt;
-        this.currentLevel = 1 + Math.floor(this.playTime / LEVEL_UP_INTERVAL_SEC);
+        // currentLevel 現在由 startNextLevel 手動推進，不再用時間計算
         this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
         this.updateWeaponAmmo(dt);
         if (this.slashCooldown > 0) this.slashCooldown -= dt;
         for (const ef of this.slashEffects) { ef.timer += dt; }
         this.slashEffects = this.slashEffects.filter(ef => ef.timer < ef.duration);
 
-        this.spawnTimer += delta;
-        const spawnInterval = spawnIntervalForLevel(this.currentLevel);
-        while (this.spawnTimer >= spawnInterval) {
-          this.spawnTimer -= spawnInterval;
-        this.enemies.push(new Enemy(this, enemyTypeForLevel(this.currentLevel)));
-      }
+        // 生怪：未清關 且 本關還有額度才生
+        if (!this.isLevelClear && this.enemiesSpawnedThisLevel < this.enemiesToSpawnThisLevel) {
+          this.spawnTimer += delta;
+          const spawnInterval = spawnIntervalForLevel(this.currentLevel) * this.debugSpawnMultiplier;
+          while (this.spawnTimer >= spawnInterval && this.enemiesSpawnedThisLevel < this.enemiesToSpawnThisLevel) {
+            this.spawnTimer -= spawnInterval;
+            let spawnType = enemyTypeForLevel(this.currentLevel);
+            if (this.debugAllowedTypes && this.debugAllowedTypes.length > 0) {
+              const allowed = this.debugAllowedTypes;
+              spawnType = allowed[Math.floor(Math.random() * allowed.length)];
+            }
+            this.enemies.push(new Enemy(this, spawnType));
+            this.enemiesSpawnedThisLevel += 1;
+          }
+        }
+
+        // 清關判定：全部怪已生成 且 畫面上沒有存活怪物
+        if (!this.isLevelClear && this.enemiesSpawnedThisLevel >= this.enemiesToSpawnThisLevel) {
+          const anyAlive = this.enemies.some(e => !e.isDead);
+          if (!anyAlive) {
+            this.triggerLevelClear();
+          }
+        }
 
       for (const enemy of this.enemies) {
         enemy.update(dt);
@@ -873,7 +1181,7 @@ function speedMultiplierForLevel(level) {
           continue;
         }
         if (!enemy.inZone && enemy.bottom() >= DEFENSE_LINE_Y) {
-          this.hp -= 1;
+          if (!this.debugGodMode) this.hp -= 1;
           enemy.inZone = true;
           enemy.y = DEFENSE_LINE_Y - enemy.displayedRadius();
         }
@@ -884,6 +1192,10 @@ function speedMultiplierForLevel(level) {
         const aliveProjectiles = [];
           for (const projectile of this.projectiles) {
             if (projectile.offscreen()) {
+              // miss 懲罰（bomb 落地算命中，不算 miss）
+              if (!projectile.hasHit && projectile.weaponType !== 'bomb') {
+                this.addHitGauge(-HIT_GAUGE_MISS_PENALTY);
+              }
               projectile.destroy();
               continue;
             }
@@ -894,16 +1206,17 @@ function speedMultiplierForLevel(level) {
             }
 
             if (projectile.weaponType === 'bomb' && projectile.height <= 0) {
-              if (LANDED_PROJECTILE_CAN_HIT_ENEMIES && !projectile.landedHitApplied) {
+              if (!projectile.landedHitApplied) {
                 const { x: gx, y: gy } = projectile.groundPos();
                 const bombDamage = projectile.weapon.damage + (projectile.perfect ? PERFECT_DAMAGE_BONUS : 0);
                 this.applyBombDamage(gx, gy, projectile.weapon.landingExplosionRadius, bombDamage, projectile.perfect);
-                this.landingEffects.push({ x: gx, y: gy, timer: 0, duration: 0.18 });
+                // 爆炸視覺效果
+                this.bombExplosionEffects.push({ x: gx, y: gy, timer: 0, duration: 0.45, radius: projectile.weapon.landingExplosionRadius * (this.bombRadiusMultiplier || 1) });
                 projectile.landedHitApplied = true;
               }
-              aliveProjectiles.push(projectile);
+              projectile.destroy();
               continue;
-          }
+            }
 
         if (projectile.weaponType === 'normal' || projectile.weaponType === 'twin') {
           const hitRadius = projectile.weapon.straightHitRadius;
@@ -922,6 +1235,7 @@ function speedMultiplierForLevel(level) {
             if (hitIndex !== -1) {
               const hitDamage = projectile.weapon.damage + (projectile.perfect ? PERFECT_DAMAGE_BONUS : 0);
               this.applyDamageToEnemy(hitIndex, hitDamage, projectile.perfect);
+              projectile.hasHit = true;
               projectile.destroy();
               continue;
             }
@@ -931,6 +1245,9 @@ function speedMultiplierForLevel(level) {
       }
       this.projectiles = aliveProjectiles;
       this.landingEffects = this.landingEffects.filter((effect) => effect.timer < effect.duration);
+      // bomb 爆炸 timer
+      for (const ef of this.bombExplosionEffects) { ef.timer += dt; }
+      this.bombExplosionEffects = this.bombExplosionEffects.filter(ef => ef.timer < ef.duration);
       const alivePopups = [];
       for (const popup of this.perfectPopups) {
         if (popup.timer < popup.duration) {
@@ -973,11 +1290,30 @@ function speedMultiplierForLevel(level) {
       this.gfx.strokeCircle(effect.x, effect.y, radius);
     }
 
+    // Bomb 爆炸視覺
+    for (const ef of this.bombExplosionEffects) {
+      const progress = ef.timer / ef.duration;
+      const expandRadius = ef.radius * (0.3 + progress * 0.7);
+      const alpha = 1 - progress;
+      // 外圈
+      this.gfx.lineStyle(3, 0xffb14d, alpha);
+      this.gfx.strokeCircle(ef.x, ef.y, expandRadius);
+      // 內填（早期）
+      if (progress < 0.3) {
+        this.gfx.fillStyle(0xffdd88, alpha * (1 - progress / 0.3) * 0.35);
+        this.gfx.fillCircle(ef.x, ef.y, expandRadius);
+      }
+      // 第二圈
+      this.gfx.lineStyle(1.5, 0xff6600, alpha * 0.6);
+      this.gfx.strokeCircle(ef.x, ef.y, expandRadius * 0.6);
+    }
+
       for (const projectile of this.projectiles) {
         projectile.draw(this.gfx);
       }
 
         this.drawAmmoHud();
+        this.drawHitGauge();
       this.hudText.setText(`Score: ${this.score}`);
       this.levelText.setText(`Level: ${this.currentLevel}`);
       this.hpText.setText(`HP: ${this.hp}`);
@@ -1001,4 +1337,4 @@ const config = {
   },
 };
 
-new Phaser.Game(config);
+window.game = new Phaser.Game(config);
