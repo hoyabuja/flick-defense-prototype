@@ -31,5 +31,141 @@
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
     <script src="./config.js"></script>
     <script src="./game.js"></script>
+
+    <script>
+      function getScene() {
+        try { return window.game.scene.scenes[0]; } catch(e) { return null; }
+      }
+
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          // DEBUG_PANEL_VISIBLE 由 config.js 控制
+          const panel = document.getElementById('debug-panel');
+          if (typeof DEBUG_PANEL_VISIBLE !== 'undefined' && !DEBUG_PANEL_VISIBLE) {
+            panel.style.display = 'none';
+            return;
+          }
+          panel.style.display = 'block';
+
+          // 生成速度
+          document.getElementById('spawn-slider').addEventListener('input', function() {
+            document.getElementById('spawn-val').textContent = this.value + 'x';
+            const scene = getScene();
+            if (scene) scene.debugSpawnMultiplier = parseFloat(this.value);
+          });
+
+          // 移動速度
+          document.getElementById('speed-slider').addEventListener('input', function() {
+            document.getElementById('speed-val').textContent = this.value + 'x';
+            const scene = getScene();
+            if (scene) scene.debugSpeedMultiplier = parseFloat(this.value);
+          });
+
+          // 無敵模式
+          document.getElementById('godmode').addEventListener('change', function() {
+            const scene = getScene();
+            if (scene) scene.debugGodMode = this.checked;
+          });
+
+          // 怪物類型
+          const typeCheckboxes = document.querySelectorAll('.type-check');
+          function updateAllowedTypes() {
+            const scene = getScene();
+            if (!scene) return;
+            const checked = [...typeCheckboxes].filter(c => c.checked).map(c => c.value);
+            scene.debugAllowedTypes = checked.length === 4 || checked.length === 0 ? null : checked;
+          }
+          typeCheckboxes.forEach(cb => cb.addEventListener('change', updateAllowedTypes));
+
+          // 關卡前進後退
+          document.getElementById('level-next').addEventListener('click', () => {
+            const scene = getScene();
+            if (scene) { scene.debugLevelAdvance(); document.getElementById('level-display').textContent = scene.currentLevel; }
+          });
+          document.getElementById('level-prev').addEventListener('click', () => {
+            const scene = getScene();
+            if (scene) { scene.debugLevelRetreat(); document.getElementById('level-display').textContent = scene.currentLevel; }
+          });
+
+          // 卡片套用
+          document.getElementById('card-apply').addEventListener('click', () => {
+            const scene = getScene();
+            if (!scene) return;
+            const checked = [...document.querySelectorAll('.card-check:checked')].map(c => c.value);
+            checked.forEach(id => scene.applyCardById(id));
+          });
+
+          // 定期更新關卡顯示
+          setInterval(() => {
+            const scene = getScene();
+            if (scene) document.getElementById('level-display').textContent = scene.currentLevel;
+          }, 500);
+
+        }, 1500);
+      });
+    </script>
+
+    <style>
+      #debug-panel {
+        display: none;
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        background: rgba(0,0,0,0.75);
+        color: #fff;
+        padding: 12px 16px;
+        border-radius: 10px;
+        font-family: Arial, sans-serif;
+        font-size: 13px;
+        z-index: 999;
+        min-width: 190px;
+        max-height: 90vh;
+        overflow-y: auto;
+      }
+      #debug-panel label { display: block; margin-bottom: 4px; }
+      #debug-panel input[type=range] { width: 100%; margin-bottom: 10px; }
+      #debug-panel button { margin: 2px; padding: 3px 10px; font-size: 13px; cursor: pointer; }
+      .card-section { margin-top: 8px; }
+      .card-section label { margin-bottom: 2px; }
+    </style>
+
+    <div id="debug-panel">
+      <b>DEBUG</b><br><br>
+
+      <b>關卡</b><br>
+      <button id="level-prev">◀ 上一關</button>
+      <span id="level-display">1</span>
+      <button id="level-next">下一關 ▶</button>
+      <br><br>
+
+      <label>生成速度: <span id="spawn-val">1x</span></label>
+      <input id="spawn-slider" type="range" min="0.3" max="2" step="0.1" value="1">
+      <label>移動速度: <span id="speed-val">1x</span></label>
+      <input id="speed-slider" type="range" min="0.3" max="3" step="0.1" value="1">
+      <label><input id="godmode" type="checkbox"> 無敵模式</label>
+      <br>
+
+      <b>怪物類型</b><br>
+      <label><input class="type-check" type="checkbox" value="normal" checked> Normal</label>
+      <label><input class="type-check" type="checkbox" value="fast" checked> Fast</label>
+      <label><input class="type-check" type="checkbox" value="tank" checked> Tank (Shroom)</label>
+      <label><input class="type-check" type="checkbox" value="zigzag" checked> Zigzag</label>
+      <br>
+
+      <b>卡片套用</b>
+      <div class="card-section">
+        <label><input class="card-check" type="checkbox" value="ammo_normal"> 主武器彈藥 +1</label>
+        <label><input class="card-check" type="checkbox" value="ammo_twin"> Twin 彈藥 +1</label>
+        <label><input class="card-check" type="checkbox" value="ammo_bomb"> Bomb 彈藥 +1</label>
+        <label><input class="card-check" type="checkbox" value="recharge_normal"> 主武器回復 +15%</label>
+        <label><input class="card-check" type="checkbox" value="recharge_twin"> Twin 回復 +15%</label>
+        <label><input class="card-check" type="checkbox" value="recharge_all"> 全武器回復 +8%</label>
+        <label><input class="card-check" type="checkbox" value="hp_up"> 晶核 HP +1</label>
+        <label><input class="card-check" type="checkbox" value="bomb_radius"> Bomb 範圍 +20%</label>
+        <label><input class="card-check" type="checkbox" value="unlock_twin"> 解鎖 Twin</label>
+        <label><input class="card-check" type="checkbox" value="unlock_bomb"> 解鎖 Bomb</label>
+      </div>
+      <button id="card-apply">套用勾選卡片</button>
+    </div>
   </body>
 </html>
