@@ -27,7 +27,7 @@ const NEAR_ENEMY_SCALE = 1.05;
 // ============================================================
 // ENEMY SPAWN & LEVEL
 // ============================================================
-const ENEMY_SPAWN_MS = 1200;
+const ENEMY_SPAWN_MS = 1580;
 const ENEMY_SPAWN_MIN_MS = 650;
 const ENEMY_SPAWN_STEP_MS = 110;
 const ENEMY_RADIUS = 16;
@@ -220,7 +220,7 @@ const WEAPON_TYPES = {
     shotCount: 1,
     spreadDeg: 0,
     landingExplosionRadius: 0,
-    maxAmmo: 5,
+    maxAmmo: 8,
     ammoCostPerShot: 1,
     ammoRechargeSeconds: 0.75,
   },
@@ -343,3 +343,26 @@ const HUD_AMMO_SEGMENT_HEIGHT = 12;
 const HUD_AMMO_SEGMENT_GAP = 4;
 const HUD_AMMO_BAR_GAP = 16;
 const HUD_AMMO_LABEL_COLOR = 0xf0f0f0;
+
+// ============================================================
+// DANGER ZONE
+// ============================================================
+const DANGER_ZONE_HEIGHT = 120;
+const DANGER_ZONE_TOP_Y = DEFENSE_LINE_Y - DANGER_ZONE_HEIGHT;
+const DANGER_ZONE_FILL_COLOR = 0xff4444;
+const DANGER_ZONE_FILL_ALPHA = 0.08;
+const DANGER_ZONE_LINE_COLOR = 0xff6666;
+const DANGER_ZONE_LINE_ALPHA = 0.6;
+const DANGER_ZONE_LINE_WIDTH = 2;
+
+// 怪物進禁區發光
+const DANGER_GLOW_COLOR = 0xff4444;
+const DANGER_GLOW_ALPHA = 0.7;
+const DANGER_GLOW_RADIUS_EXTRA = 12;
+
+// 斬殺
+const SLASH_DAMAGE = 0.4;
+const SLASH_COOLDOWN = 0.4;
+const SLASH_MAX_TARGETS = 2;
+const SLASH_MISS_STUN = 0.2;
+const SLASH_HIT_RADIUS = 28;
