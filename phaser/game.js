@@ -447,6 +447,7 @@ function speedMultiplierForLevel(level) {
     this.height = 0;
     this.landed = false;
     this.landedHitApplied = false;
+    this.landedMissApplied = false;
     this.hasHit = false;
       this.vx = directionX * speed * HORIZONTAL_SPEED_MULTIPLIER;
       this.vy = directionY * speed * HORIZONTAL_SPEED_MULTIPLIER;
@@ -499,7 +500,7 @@ function speedMultiplierForLevel(level) {
   }
 
     offscreen() {
-      return this.groundX < -50 || this.groundX > WIDTH + 50 || this.groundY < -50 || this.groundY > HEIGHT + 50;
+      return this.groundX < -50 || this.groundX > WIDTH + 50 || this.groundY < -50;
     }
 
     destroy() {
@@ -607,6 +608,8 @@ function speedMultiplierForLevel(level) {
         // Hit gauge
         this.hitGauge = 0;
         this.hitGaugeCardCount = 0; // 已觸發幾次抽卡
+        // 連擊
+        this.comboCount = 0;
     }
   
     preload() {
@@ -637,7 +640,6 @@ function speedMultiplierForLevel(level) {
       this.levelText = this.add.text(HUD_LEVEL_TEXT_X, HUD_LEVEL_TEXT_Y, 'Level: 1', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(0.5, 0).setDepth(70);
       this.debugText = this.add.text(16, 48, '', { fontFamily: 'Arial', fontSize: '18px', color: '#f0f0f0' }).setDepth(70);
       this.debugText.setVisible(false);
-      this.hpText = this.add.text(WIDTH - 16, 14, 'HP: 5', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(1, 0).setDepth(70);
       this.gameOverText = this.add.text(WIDTH / 2, HEIGHT / 2 - 20, 'GAME OVER', { fontFamily: 'Arial', fontSize: '72px', color: '#f0f0f0' }).setOrigin(0.5).setDepth(80);
       this.finalScoreText = this.add.text(WIDTH / 2, HEIGHT / 2 + 34, '', { fontFamily: 'Arial', fontSize: '42px', color: '#f0f0f0' }).setOrigin(0.5).setDepth(80);
     this.gameOverText.setVisible(false);
@@ -651,10 +653,22 @@ function speedMultiplierForLevel(level) {
     this.weaponSwitchBtn.on('pointerup', () => { this.cycleWeapon(); });
     this.updateWeaponSwitchBtn();
 
-    // 命中條 HUD（左下角）
+    // Hit Gauge（右側，直立進度條）
     this.hitGaugeGfx = this.add.graphics().setDepth(70);
-    this.hitGaugeLabel = this.add.text(HUD_AMMO_X, HEIGHT - 60, 'GAUGE', {
-      fontFamily: 'Arial', fontSize: '13px', color: '#aaddff',
+    this.hitGaugeLabel = this.add.text(HUD_HIT_GAUGE_X + 6, HUD_HIT_GAUGE_Y + HUD_HIT_GAUGE_MAX_HEIGHT + 6, '', {
+      fontFamily: 'Arial', fontSize: '11px', color: '#aaddff',
+    }).setOrigin(0.5, 0).setDepth(70);
+
+    // 連擊文字（右側 Hit Gauge 上方）
+    this.comboText = this.add.text(HUD_COMBO_X + 6, HUD_COMBO_Y, '', {
+      fontFamily: 'Arial', fontSize: '22px', color: '#ffe066',
+      stroke: '#000000', strokeThickness: 3,
+    }).setOrigin(0.5, 1).setDepth(70).setVisible(false);
+
+    // 晶核血條（左下角橫放）
+    this.hpBarGfx = this.add.graphics().setDepth(70);
+    this.hpBarLabel = this.add.text(HUD_HP_BAR_X, HUD_HP_BAR_Y - 18, '晶核', {
+      fontFamily: 'Arial', fontSize: '13px', color: '#ff8888',
     }).setDepth(70);
 
     // Level clear UI
@@ -775,7 +789,6 @@ function speedMultiplierForLevel(level) {
       for (const el of this.cardUiElements) { el.destroy(); }
       this.cardUiElements = [];
       this.isCardPicking = false;
-      this.startNextLevel();
     }
 
     // Debug 用：直接套用指定卡片
@@ -887,6 +900,14 @@ function speedMultiplierForLevel(level) {
         MIN_HORIZONTAL_SPEED,
         MAX_HORIZONTAL_SPEED,
       );
+
+      // 速度傷害乘數：gestureSpeed 對應 MIN/MAX_HORIZONTAL_SPEED 範圍線性插值
+      const speedRatio = Phaser.Math.Clamp(
+        (gestureSpeed * weapon.speedMultiplier - MIN_HORIZONTAL_SPEED) / (MAX_HORIZONTAL_SPEED - MIN_HORIZONTAL_SPEED),
+        0, 1,
+      );
+      const speedDamageMultiplier = Phaser.Math.Linear(SPEED_DAMAGE_MIN_MULTIPLIER, SPEED_DAMAGE_MAX_MULTIPLIER, speedRatio);
+
       const ammo = this.weaponAmmo[wtype];
       if (!ammo || ammo.currentAmmo < ammo.ammoCostPerShot) {
         this.lastFiredWeaponType = wtype;
@@ -904,16 +925,19 @@ function speedMultiplierForLevel(level) {
         const rightProjectile = new Projectile(this, startX, startY, right.x, right.y, baseSpeed, wtype);
         leftProjectile.perfect = isPerfectRelease;
         rightProjectile.perfect = isPerfectRelease;
+        leftProjectile.speedDamageMultiplier = speedDamageMultiplier;
+        rightProjectile.speedDamageMultiplier = speedDamageMultiplier;
         this.projectiles.push(leftProjectile);
         this.projectiles.push(rightProjectile);
-      spawnedCount = 2;
-      this.lastFiredWeaponType = wtype;
-      this.lastSpawnedProjectileCount = spawnedCount;
-      return;
-    }
+        spawnedCount = 2;
+        this.lastFiredWeaponType = wtype;
+        this.lastSpawnedProjectileCount = spawnedCount;
+        return;
+      }
 
       const projectile = new Projectile(this, startX, startY, directionX, directionY, baseSpeed, wtype);
       projectile.perfect = isPerfectRelease;
+      projectile.speedDamageMultiplier = speedDamageMultiplier;
       this.projectiles.push(projectile);
       spawnedCount = 1;
       this.lastFiredWeaponType = wtype;
@@ -965,7 +989,18 @@ function speedMultiplierForLevel(level) {
 
     addHitGauge(value) {
       const threshold = hitGaugeThreshold(this.hitGaugeCardCount);
+
+      // 連擊邏輯
+      if (value > 0) {
+        this.comboCount += 1;
+        // 每 5 連擊 +10%，上限 +100%
+        const comboTier = Math.min(Math.floor(this.comboCount / 5), 10);
+        const multiplier = 1 + comboTier * 0.1;
+        value = value * multiplier;
+      }
+
       this.hitGauge = Math.max(HIT_GAUGE_MIN, Math.min(this.hitGauge + value, threshold));
+
       if (this.hitGauge >= threshold) {
         this.hitGauge = 0;
         this.hitGaugeCardCount += 1;
@@ -973,29 +1008,70 @@ function speedMultiplierForLevel(level) {
       }
     }
 
+    // miss 懲罰，不觸發 comboCount（由呼叫端負責歸零）
+    addHitGaugePenalty() {
+      const threshold = hitGaugeThreshold(this.hitGaugeCardCount);
+      this.hitGauge = Math.max(HIT_GAUGE_MIN, this.hitGauge - HIT_GAUGE_MISS_PENALTY);
+    }
+
     drawHitGauge() {
       const g = this.hitGaugeGfx;
       g.clear();
       const threshold = hitGaugeThreshold(this.hitGaugeCardCount);
       const progress = Math.min(this.hitGauge / threshold, 1);
-      const barW = 80;
-      const barH = 10;
-      const x = HUD_AMMO_X;
-      const y = HEIGHT - 44;
+      const x = HUD_HIT_GAUGE_X;
+      const topY = HUD_HIT_GAUGE_Y;
+      const barW = HUD_HIT_GAUGE_WIDTH;
+      const barH = HUD_HIT_GAUGE_MAX_HEIGHT;
+
       // 背景
       g.fillStyle(0x2a2f36, 0.85);
-      g.fillRoundedRect(x, y, barW, barH, 4);
-      // 填充
+      g.fillRoundedRect(x, topY, barW, barH, 4);
+
+      // 填充（從底部往上）
       if (progress > 0) {
+        const fillH = Math.round(barH * progress);
         const fillColor = progress >= 0.8 ? 0xffe066 : 0x5ad2f0;
         g.fillStyle(fillColor, 1);
-        g.fillRoundedRect(x, y, Math.round(barW * progress), barH, 4);
+        g.fillRoundedRect(x, topY + barH - fillH, barW, fillH, 4);
       }
+
       // 外框
       g.lineStyle(1, 0xaaddff, 0.5);
-      g.strokeRoundedRect(x, y, barW, barH, 4);
-      // 數字
-      this.hitGaugeLabel.setText(`${Math.floor(this.hitGauge)} / ${threshold}`);
+      g.strokeRoundedRect(x, topY, barW, barH, 4);
+
+      // 數字顯示在條底下
+      this.hitGaugeLabel.setText(`${Math.floor(this.hitGauge)}/${threshold}`);
+      this.hitGaugeLabel.setPosition(x + barW / 2, topY + barH + 4);
+    }
+
+    drawHpBar() {
+      const g = this.hpBarGfx;
+      g.clear();
+      const hp = Math.max(0, this.hp);
+      const x = HUD_HP_BAR_X;
+      const y = HUD_HP_BAR_Y;
+      const segW = HUD_HP_BAR_SEGMENT_W;
+      const segH = HUD_HP_BAR_SEGMENT_H;
+      const gap = HUD_HP_BAR_SEGMENT_GAP;
+      // 顯示最多 10 格，避免超出畫面
+      const displayMax = Math.min(hp, 10);
+      for (let i = 0; i < displayMax; i++) {
+        const sx = x + i * (segW + gap);
+        g.fillStyle(0xdd2222, 1);
+        g.fillRoundedRect(sx, y, segW, segH, 3);
+        g.lineStyle(1, 0xff6666, 0.7);
+        g.strokeRoundedRect(sx, y, segW, segH, 3);
+      }
+    }
+
+    drawCombo() {
+      if (this.comboCount >= 3) {
+        this.comboText.setText(`x${this.comboCount}`);
+        this.comboText.setVisible(true);
+      } else {
+        this.comboText.setVisible(false);
+      }
     }
 
     cycleWeapon() {
@@ -1044,21 +1120,28 @@ function speedMultiplierForLevel(level) {
 
     applyBombDamage(cx, cy, radius, damage, isPerfect = false) {
       const effectiveRadius = radius * (this.bombRadiusMultiplier || 1);
+      let hitCount = 0;
       for (let i = this.enemies.length - 1; i >= 0; i -= 1) {
         const enemy = this.enemies[i];
+        if (enemy.isDead) continue;
         const hitRadius = effectiveRadius + enemy.displayedRadius();
         if (Phaser.Math.Distance.Between(enemy.x, enemy.y, cx, cy) <= hitRadius) {
           this.addHitGauge(HIT_GAUGE_HIT_VALUE);
+          hitCount += 1;
           enemy.hp -= damage;
           if (isPerfect) {
             this.spawnPerfectPopup(enemy.x, enemy.y);
           }
           if (enemy.hp <= 0) {
-            this.enemies.splice(i, 1);
+            enemy.isDead = true;
+            enemy.deathTimer = 0;
             this.score += enemy.type.scoreValue || 1;
+          } else {
+            enemy.applyHitStun();
           }
         }
       }
+      return hitCount;
     }
 
     spawnPerfectPopup(x, y) {
@@ -1170,31 +1253,45 @@ function speedMultiplierForLevel(level) {
 
         const aliveProjectiles = [];
           for (const projectile of this.projectiles) {
+            // 飛出上/左/右邊界 → miss，移除
             if (projectile.offscreen()) {
-              // miss 懲罰（bomb 落地算命中，不算 miss）
-              if (!projectile.hasHit && projectile.weaponType !== 'bomb') {
-                this.addHitGauge(-HIT_GAUGE_MISS_PENALTY);
+              if (!projectile.hasHit) {
+                this.comboCount = 0;
+                this.addHitGaugePenalty();
               }
               projectile.destroy();
               continue;
             }
 
-            if (projectile.landed && !LANDED_PROJECTILE_CAN_HIT_ENEMIES) {
-              aliveProjectiles.push(projectile);
-              continue;
-            }
-
+            // ⚠️ bomb 判定必須在 landed guard 之前，否則永遠跑不到
             if (projectile.weaponType === 'bomb' && projectile.height <= 0) {
               if (!projectile.landedHitApplied) {
                 const { x: gx, y: gy } = projectile.groundPos();
-                const bombDamage = projectile.weapon.damage + (projectile.perfect ? PERFECT_DAMAGE_BONUS : 0);
-                this.applyBombDamage(gx, gy, projectile.weapon.landingExplosionRadius, bombDamage, projectile.perfect);
-                // 爆炸視覺效果
+                const bombDamage = (projectile.weapon.damage + (projectile.perfect ? PERFECT_DAMAGE_BONUS : 0)) * (projectile.speedDamageMultiplier || 1);
+                const bombHitCount = this.applyBombDamage(gx, gy, projectile.weapon.landingExplosionRadius, bombDamage, projectile.perfect);
                 this.bombExplosionEffects.push({ x: gx, y: gy, timer: 0, duration: 0.45, radius: projectile.weapon.landingExplosionRadius * (this.bombRadiusMultiplier || 1) });
                 projectile.landedHitApplied = true;
+                // bomb 沒打到任何人 → miss
+                if (bombHitCount === 0) {
+                  this.comboCount = 0;
+                  this.addHitGaugePenalty();
+                }
               }
               projectile.destroy();
               continue;
+            }
+
+            // 落地（非 bomb）→ 記 miss 一次，但留在畫面
+            if (projectile.landed) {
+              if (!projectile.landedMissApplied && !projectile.hasHit) {
+                projectile.landedMissApplied = true;
+                this.comboCount = 0;
+                this.addHitGaugePenalty();
+              }
+              if (!LANDED_PROJECTILE_CAN_HIT_ENEMIES) {
+                aliveProjectiles.push(projectile);
+                continue;
+              }
             }
 
         if (projectile.weaponType === 'normal' || projectile.weaponType === 'twin') {
@@ -1212,7 +1309,7 @@ function speedMultiplierForLevel(level) {
             }
             }
             if (hitIndex !== -1) {
-              const hitDamage = projectile.weapon.damage + (projectile.perfect ? PERFECT_DAMAGE_BONUS : 0);
+              const hitDamage = (projectile.weapon.damage + (projectile.perfect ? PERFECT_DAMAGE_BONUS : 0)) * (projectile.speedDamageMultiplier || 1);
               this.applyDamageToEnemy(hitIndex, hitDamage, projectile.perfect);
               projectile.hasHit = true;
               projectile.destroy();
@@ -1293,9 +1390,10 @@ function speedMultiplierForLevel(level) {
 
         this.drawAmmoHud();
         this.drawHitGauge();
+        this.drawHpBar();
+        this.drawCombo();
       this.hudText.setText(`Score: ${this.score}`);
       this.levelText.setText(`Level: ${this.currentLevel}`);
-      this.hpText.setText(`HP: ${this.hp}`);
     }
   }
 
