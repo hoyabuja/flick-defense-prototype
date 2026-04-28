@@ -182,11 +182,58 @@ function speedMultiplierForLevel(level) {
         this.deathTimer += dt;
         return;
       }
+      if (this.inZone) {
+        this.updateInZone(dt);
+        return;
+      }
       const mv = this.type.movement;
       if (mv && mv.movementType === 'hop') {
         this.updateHop(dt);
       } else {
         this.updateGlide(dt);
+      }
+    }
+
+    updateInZone(dt) {
+      // Y 固定在防線，X 往中心靠
+      const targetX = WIDTH / 2;
+      const speed = 60 * dt;
+      if (Math.abs(this.x - targetX) > speed) {
+        this.x += this.x < targetX ? speed : -speed;
+      } else {
+        this.x = targetX;
+      }
+      this.y = DEFENSE_LINE_Y - this.displayedRadius();
+
+      // 繼續播 hop 動畫（視覺用）
+      const mv = this.type.movement;
+      if (mv && mv.movementType === 'hop') {
+        if (this.hitStunTimer > 0) {
+          this.hitStunTimer -= dt;
+          return;
+        }
+        this.hopTimer += dt;
+        if (this.hopState === 'CHARGING') {
+          this.hopScaleX = mv.squashScaleX;
+          this.hopScaleY = mv.squashScaleY;
+          this.hopVisualOffsetY = 0;
+          if (this.hopTimer >= this.hopChargeDuration) {
+            this.hopTimer = 0;
+            this.hopDuration = Phaser.Math.FloatBetween(mv.hopDurationMin, mv.hopDurationMax);
+            this.hopState = 'AIRBORNE';
+          }
+        } else if (this.hopState === 'AIRBORNE') {
+          const t = Math.min(this.hopTimer / this.hopDuration, 1);
+          this.hopVisualOffsetY = -mv.jumpArcHeight * Math.sin(Math.PI * t);
+          this.hopScaleX = mv.stretchScaleX;
+          this.hopScaleY = mv.stretchScaleY;
+          if (t >= 1) { this.hopTimer = 0; this.hopVisualOffsetY = 0; this.hopState = 'LANDING'; }
+        } else if (this.hopState === 'LANDING') {
+          this.hopScaleX = mv.squashScaleX;
+          this.hopScaleY = mv.squashScaleY;
+          this.hopPause = Phaser.Math.FloatBetween(mv.landingPauseMin, mv.landingPauseMax);
+          if (this.hopTimer >= this.hopPause) { this.hopTimer = 0; this.hopScaleX = 1; this.hopScaleY = 1; this.hopState = 'CHARGING'; }
+        }
       }
     }
 
@@ -327,7 +374,16 @@ function speedMultiplierForLevel(level) {
         const shadowHeight = ENEMY_SHADOW_BASE_H + shadowScale * 10;
         const shadowAlpha = ENEMY_SHADOW_MIN_ALPHA + shadowScale * (ENEMY_SHADOW_MAX_ALPHA - ENEMY_SHADOW_MIN_ALPHA);
         gfx.fillStyle(SHADOW, shadowAlpha);
-        gfx.fillEllipse(this.x, this.y + bodySize * 0.3, shadowWidth, shadowHeight);
+        gfx.fillEllipse(this.x, this.y + bodySize * 0.5, shadowWidth, shadowHeight);
+
+        // 禁區發光
+        if (this.y >= DANGER_ZONE_TOP_Y && !this.isDead) {
+          const glowRadius = (displaySize / 2) + DANGER_GLOW_RADIUS_EXTRA;
+          gfx.fillStyle(DANGER_GLOW_COLOR, DANGER_GLOW_ALPHA * 0.3);
+          gfx.fillCircle(this.x, visualY, glowRadius + 6);
+          gfx.lineStyle(2, DANGER_GLOW_COLOR, DANGER_GLOW_ALPHA);
+          gfx.strokeCircle(this.x, visualY, glowRadius);
+        }
         return;
       }
       const sideRadius = Math.max(5, bodyWidth * 0.16);
@@ -513,6 +569,8 @@ function speedMultiplierForLevel(level) {
       this.aimStartTime = 0;
         this.lastFiredWeaponType = 'none';
         this.lastSpawnedProjectileCount = 0;
+        this.slashCooldown = 0;
+        this.slashEffects = [];
     }
   
     preload() {
@@ -559,21 +617,59 @@ function speedMultiplierForLevel(level) {
       const dx = aimEnd.x - this.aimStart.x;
       const dy = aimEnd.y - this.aimStart.y;
       const dragDistance = Math.hypot(dx, dy);
-      if (dragDistance >= MIN_FLICK_DISTANCE) {
-        const length = Math.hypot(dx, dy);
-        if (length > 0) {
-          const directionX = dx / length;
-          const directionY = dy / length;
-          const releaseTime = this.time.now / 1000;
-          const dragDuration = Math.max(releaseTime - this.aimStartTime, MIN_GESTURE_DURATION);
-          const gestureSpeed = dragDistance / dragDuration;
+
+      // 起點在禁區內 → flick
+      if (this.aimStart.y >= DANGER_ZONE_TOP_Y) {
+        if (dragDistance >= MIN_FLICK_DISTANCE) {
+          const length = Math.hypot(dx, dy);
+          if (length > 0) {
+            const directionX = dx / length;
+            const directionY = dy / length;
+            const releaseTime = this.time.now / 1000;
+            const dragDuration = Math.max(releaseTime - this.aimStartTime, MIN_GESTURE_DURATION);
+            const gestureSpeed = dragDistance / dragDuration;
             const isPerfectRelease = gestureSpeed >= PERFECT_RELEASE_SPEED_MIN && gestureSpeed <= PERFECT_RELEASE_SPEED_MAX;
             this.spawnWeaponProjectiles(aimEnd.x, aimEnd.y, directionX, directionY, gestureSpeed, isPerfectRelease);
+          }
         }
+        this.aimStart = null;
+        return;
+      }
+
+      // 否則斬殺（起點在禁區外，終點必須在禁區內）
+      if (dragDistance >= MIN_FLICK_DISTANCE && aimEnd.y >= DANGER_ZONE_TOP_Y) {
+        this.applySlash(this.aimStart.x, this.aimStart.y, aimEnd.x, aimEnd.y);
       }
       this.aimStart = null;
     });
   }
+
+    applySlash(x1, y1, x2, y2) {
+      if (this.slashCooldown > 0) return;
+
+      let hitCount = 0;
+      for (let i = this.enemies.length - 1; i >= 0; i--) {
+        if (hitCount >= SLASH_MAX_TARGETS) break;
+        const enemy = this.enemies[i];
+        if (enemy.isDead) continue;
+        if (enemy.y < DANGER_ZONE_TOP_Y) continue;
+        const dist = distancePointToSegment(enemy.x, enemy.y, x1, y1, x2, y2);
+        if (dist <= SLASH_HIT_RADIUS + enemy.displayedRadius()) {
+          enemy.hp -= SLASH_DAMAGE;
+          enemy.applyHitStun();
+          hitCount++;
+          if (enemy.hp <= 0) {
+            enemy.isDead = true;
+            enemy.deathTimer = 0;
+            this.score += enemy.type.scoreValue || 1;
+          }
+        }
+      }
+
+      // 斬殺特效
+      this.slashEffects.push({ x1, y1, x2, y2, timer: 0, duration: 0.18, hit: hitCount > 0 });
+      this.slashCooldown = hitCount > 0 ? SLASH_COOLDOWN : SLASH_MISS_STUN;
+    }
 
     spawnWeaponProjectiles(startX, startY, directionX, directionY, gestureSpeed, isPerfectRelease) {
       const weapon = WEAPON_TYPES[CURRENT_WEAPON_TYPE] || WEAPON_TYPES.normal;
@@ -717,6 +813,14 @@ function speedMultiplierForLevel(level) {
     drawTerrain() {
       const g = this.gfx;
       g.clear();
+
+      // 禁區背景
+      g.fillStyle(DANGER_ZONE_FILL_COLOR, DANGER_ZONE_FILL_ALPHA);
+      g.fillRect(0, DANGER_ZONE_TOP_Y, WIDTH, DANGER_ZONE_HEIGHT);
+
+      // 禁區上邊界線
+      g.lineStyle(DANGER_ZONE_LINE_WIDTH, DANGER_ZONE_LINE_COLOR, DANGER_ZONE_LINE_ALPHA);
+      g.lineBetween(0, DANGER_ZONE_TOP_Y, WIDTH, DANGER_ZONE_TOP_Y);
     }
 
   update(time, delta) {
@@ -727,6 +831,9 @@ function speedMultiplierForLevel(level) {
         this.currentLevel = 1 + Math.floor(this.playTime / LEVEL_UP_INTERVAL_SEC);
         this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
         this.updateWeaponAmmo(dt);
+        if (this.slashCooldown > 0) this.slashCooldown -= dt;
+        for (const ef of this.slashEffects) { ef.timer += dt; }
+        this.slashEffects = this.slashEffects.filter(ef => ef.timer < ef.duration);
 
         this.spawnTimer += delta;
         const spawnInterval = spawnIntervalForLevel(this.currentLevel);
@@ -765,10 +872,10 @@ function speedMultiplierForLevel(level) {
           aliveEnemies.push(enemy);
           continue;
         }
-        if (enemy.bottom() >= DEFENSE_LINE_Y) {
+        if (!enemy.inZone && enemy.bottom() >= DEFENSE_LINE_Y) {
           this.hp -= 1;
-          if (enemy.slimeSprite) { enemy.slimeSprite.destroy(); enemy.slimeSprite = null; }
-          continue;
+          enemy.inZone = true;
+          enemy.y = DEFENSE_LINE_Y - enemy.displayedRadius();
         }
         aliveEnemies.push(enemy);
       }
@@ -844,6 +951,15 @@ function speedMultiplierForLevel(level) {
     }
 
       this.drawTerrain();
+
+      // 斬殺特效
+      for (const ef of this.slashEffects) {
+        const progress = ef.timer / ef.duration;
+        const alpha = 1 - progress;
+        const color = ef.hit ? 0xffffff : 0xff4444;
+        this.gfx.lineStyle(3 + (1 - progress) * 3, color, alpha);
+        this.gfx.lineBetween(ef.x1, ef.y1, ef.x2, ef.y2);
+      }
 
       for (const enemy of this.enemies) {
         enemy.draw(this.gfx);
