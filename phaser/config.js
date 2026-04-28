@@ -17,7 +17,7 @@ const PLATFORM_EDGE = 0xdce2e6;
 const PLATFORM_UNDER = 0x2e363e;
 const ENEMY_COLOR = 0xdc4646;
 
-const DEFENSE_LINE_Y = HEIGHT - 120;
+const DEFENSE_LINE_Y = HEIGHT - 140;
 const FAR_BATTLEFIELD_Y = 70;
 const FAR_BATTLEFIELD_WIDTH = 240;
 const NEAR_BATTLEFIELD_WIDTH = 360;
@@ -54,7 +54,7 @@ const ZIGZAG_ENEMY_MAX_CHANCE = 0.22;
 // ENEMY SIZE
 // ============================================================
 const ENEMY_SIZE_CONFIG = {
-  normal: { bodySize: 40, hitRadius: 16, scale: 1.00 },
+  normal: { bodySize: 45, hitRadius: 16, scale: 1.00 },
   fast:   { bodySize: 32, hitRadius: 14, scale: 0.88 },
   tank:   { bodySize: 48, hitRadius: 21, scale: 1.24 },
   zigzag: { bodySize: 34, hitRadius: 17, scale: 1.03 },
@@ -85,10 +85,10 @@ const ENEMY_MOVEMENT_CONFIG = {
     lateralDriftMin: -10,
     lateralDriftMax: 10,
     jumpArcHeight: 14,
-    squashScaleX: 1.12,
-    squashScaleY: 0.88,
-    stretchScaleX: 0.92,
-    stretchScaleY: 1.08,
+    squashScaleX: 0,
+    squashScaleY: 0,
+    stretchScaleX: 0,
+    stretchScaleY: 0,
     hitStunMs: 110,
     nearBaseMultiplier: 1.15,
   },
@@ -125,7 +125,7 @@ const ENEMY_MOVEMENT_CONFIG = {
     squashScaleY: 0.84,
     stretchScaleX: 0.90,
     stretchScaleY: 1.10,
-    hitStunMs: 60,
+    hitStunMs: 185,
     nearBaseMultiplier: 1.10,
   },
   zigzag: {
@@ -220,7 +220,7 @@ const WEAPON_TYPES = {
     shotCount: 1,
     spreadDeg: 0,
     landingExplosionRadius: 0,
-    maxAmmo: 8,
+    maxAmmo: 5,
     ammoCostPerShot: 1,
     ammoRechargeSeconds: 0.75,
   },
@@ -347,7 +347,7 @@ const HUD_AMMO_LABEL_COLOR = 0xf0f0f0;
 // ============================================================
 // DANGER ZONE
 // ============================================================
-const DANGER_ZONE_HEIGHT = 120;
+const DANGER_ZONE_HEIGHT = 180;
 const DANGER_ZONE_TOP_Y = DEFENSE_LINE_Y - DANGER_ZONE_HEIGHT;
 const DANGER_ZONE_FILL_COLOR = 0xff4444;
 const DANGER_ZONE_FILL_ALPHA = 0.08;
@@ -366,3 +366,146 @@ const SLASH_COOLDOWN = 0.4;
 const SLASH_MAX_TARGETS = 2;
 const SLASH_MISS_STUN = 0.2;
 const SLASH_HIT_RADIUS = 28;
+
+// ============================================================
+// LEVEL / WAVE SYSTEM
+// ============================================================
+const ENEMIES_PER_LEVEL_BASE = 12;
+const ENEMIES_PER_LEVEL_STEP = 5;
+
+// ============================================================
+// CARD SYSTEM
+// ============================================================
+const CARD_EVERY_N_LEVELS = 2;
+const CARD_HP_MAX_TIMES = 3;
+
+const CARD_POOL = [
+  {
+    id: 'ammo_normal',
+    label: '主武器彈藥 +1',
+    desc: '主武器上限 +1',
+    type: 'stat',
+    apply(scene) {
+      scene.weaponAmmo.normal.maxAmmo += 1;
+      scene.weaponAmmo.normal.currentAmmo += 1;
+    },
+  },
+  {
+    id: 'ammo_twin',
+    label: 'Twin 彈藥 +1',
+    desc: 'Twin 上限 +1',
+    type: 'stat',
+    apply(scene) {
+      scene.weaponAmmo.twin.maxAmmo += 1;
+      scene.weaponAmmo.twin.currentAmmo += 1;
+    },
+  },
+  {
+    id: 'ammo_bomb',
+    label: 'Bomb 彈藥 +1',
+    desc: 'Bomb 上限 +1',
+    type: 'stat',
+    apply(scene) {
+      scene.weaponAmmo.bomb.maxAmmo += 1;
+      scene.weaponAmmo.bomb.currentAmmo += 1;
+    },
+  },
+  {
+    id: 'recharge_normal',
+    label: '主武器回復 +15%',
+    desc: '主武器補彈加快',
+    type: 'stat',
+    apply(scene) {
+      scene.weaponAmmo.normal.ammoRechargeSeconds *= 0.85;
+    },
+  },
+  {
+    id: 'recharge_twin',
+    label: 'Twin 回復 +15%',
+    desc: 'Twin 補彈加快',
+    type: 'stat',
+    apply(scene) {
+      scene.weaponAmmo.twin.ammoRechargeSeconds *= 0.85;
+    },
+  },
+  {
+    id: 'recharge_all',
+    label: '全武器回復 +8%',
+    desc: '所有武器補彈小幅加快',
+    type: 'stat',
+    apply(scene) {
+      for (const ammo of Object.values(scene.weaponAmmo)) {
+        ammo.ammoRechargeSeconds *= 0.92;
+      }
+    },
+  },
+  {
+    id: 'hp_up',
+    label: '晶核 HP +1',
+    desc: '最多觸發 3 次',
+    type: 'stat',
+    apply(scene) {
+      scene.hp += 1;
+      scene.cardHpCount = (scene.cardHpCount || 0) + 1;
+    },
+    canPick(scene) {
+      return (scene.cardHpCount || 0) < CARD_HP_MAX_TIMES;
+    },
+  },
+  {
+    id: 'bomb_radius',
+    label: 'Bomb 範圍 +20%',
+    desc: '爆炸半徑增加',
+    type: 'stat',
+    apply(scene) {
+      scene.bombRadiusMultiplier = (scene.bombRadiusMultiplier || 1) * 1.2;
+    },
+  },
+  {
+    id: 'unlock_twin',
+    label: '解鎖 Twin',
+    desc: '獲得 Twin 武器（切換機制待開放）',
+    type: 'unlock',
+    weaponKey: 'twin',
+    apply(scene) {
+      scene.unlockedWeapons.twin = true;
+    },
+    canPick(scene) {
+      return !scene.unlockedWeapons.twin;
+    },
+  },
+  {
+    id: 'unlock_bomb',
+    label: '解鎖 Bomb',
+    desc: '獲得 Bomb 武器（切換機制待開放）',
+    type: 'unlock',
+    weaponKey: 'bomb',
+    apply(scene) {
+      scene.unlockedWeapons.bomb = true;
+    },
+    canPick(scene) {
+      return !scene.unlockedWeapons.bomb;
+    },
+  },
+];
+
+// ============================================================
+// DEBUG
+// ============================================================
+const DEBUG_PANEL_VISIBLE = false; // 改成 false 可隱藏 debug 面板
+
+// ============================================================
+// HIT GAUGE (抽卡累積機制)
+// ============================================================
+const HIT_GAUGE_HIT_VALUE = 1;       // 命中 +1
+const HIT_GAUGE_MISS_PENALTY = 0.3;  // miss -0.3
+const HIT_GAUGE_MIN = 0;
+// 第 n 次抽卡所需命中數：20, 32, 46, 62, 80...（每次+遞增2）
+function hitGaugeThreshold(cardCount) {
+  // cardCount = 目前已觸發幾次（0-based），算下一次門檻
+  let total = 20;
+  for (let i = 1; i <= cardCount; i++) {
+    total += 10 + i * 2;
+  }
+  return total;
+}
