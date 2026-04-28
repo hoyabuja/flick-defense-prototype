@@ -27,7 +27,7 @@ const NEAR_ENEMY_SCALE = 1.05;
 // ============================================================
 // ENEMY SPAWN & LEVEL
 // ============================================================
-const ENEMY_SPAWN_MS = 1000;
+const ENEMY_SPAWN_MS = 1200;
 const ENEMY_SPAWN_MIN_MS = 650;
 const ENEMY_SPAWN_STEP_MS = 110;
 const ENEMY_RADIUS = 16;
