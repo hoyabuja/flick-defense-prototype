@@ -349,67 +349,46 @@ function speedMultiplierForLevel(level) {
       return 'slime';
     }
 
-    getAnimKey() {
-      // slime 用 atlas 動畫
-      if (this.getSpritePrefix() === 'slime') {
-        if (this.isDead) return 'slime_death';
-        if (this.hitStunTimer > 0) return 'slime_hit';
-        if (this.hopState === 'AIRBORNE') return 'slime_hop';
-        return 'slime_idle';
-      }
-      // shroom 用舊圖片 key
-      if (this.isDead) return 'shroom_death';
-      if (this.hitStunTimer > 0) return 'shroom_hit';
-      if (this.hopState === 'AIRBORNE') return 'shroom_hop';
-      return 'shroom_idle';
-    }
-
-    isSlimeAtlas() {
-      return this.getSpritePrefix() === 'slime' && this.scene.textures.exists('slime');
+    getSlimeSpriteKey() {
+      const prefix = this.getSpritePrefix();
+      if (this.isDead) return prefix + '_death';
+      if (this.hitStunTimer > 0) return prefix + '_hit';
+      if (this.hopState === 'AIRBORNE') return prefix + '_hop';
+      return prefix + '_idle';
     }
 
     draw(gfx) {
       const radius = this.displayedRadius();
+      const progress = this.progress();
+      const bodyColor = this.type.color;
       const bodySize = Math.max(this.type.bodySize, radius * 2.0);
       const scaleX = this.hopScaleX || 1;
       const scaleY = this.hopScaleY || 1;
       const visualY = this.y + (this.hopVisualOffsetY || 0);
-      const displaySize = bodySize * 1.8 * this.visualScale();
+      const bodyWidth = bodySize * 1.04 * scaleX;
+      const bodyHeight = bodySize * 0.94 * scaleY;
+      const bodyTop = visualY - bodyHeight / 2;
 
+      // slime sprite 顯示
       const mv = this.type.movement;
-      if (mv && mv.movementType === 'hop' && (this.isSlimeAtlas() || this.scene.textures.exists(this.getSpritePrefix() + '_idle'))) {
-        const animKey = this.getAnimKey();
-
+      const spritePrefix = this.getSpritePrefix();
+      if (mv && mv.movementType === 'hop' && this.scene.textures.exists(spritePrefix + '_idle')) {
+        const spriteKey = this.getSlimeSpriteKey();
         if (!this.slimeSprite) {
-          if (this.isSlimeAtlas()) {
-            // atlas sprite
-            this.slimeSprite = this.scene.add.sprite(this.x, visualY, 'slime', 'idle').setDepth(10);
-          } else {
-            // 舊圖片 image
-            this.slimeSprite = this.scene.add.image(this.x, visualY, animKey).setDepth(10);
-          }
+          this.slimeSprite = this.scene.add.image(this.x, visualY, spriteKey).setDepth(10);
         }
-
-        if (this.isSlimeAtlas()) {
-          // 播動畫（只在動畫 key 改變時重新 play）
-          if (this.slimeSprite.anims.currentAnim?.key !== animKey) {
-            this.slimeSprite.play(animKey);
-          }
-        } else {
-          this.slimeSprite.setTexture(animKey);
-        }
-
+        const displaySize = bodySize * 1.8 * this.visualScale();
+        this.slimeSprite.setTexture(spriteKey);
         this.slimeSprite.setPosition(this.x, visualY);
         this.slimeSprite.setDisplaySize(displaySize * scaleX, displaySize * scaleY);
         this.slimeSprite.setDepth(10 + this.y);
-
         // 影子
         const shadowScale = this.visualScale();
         const shadowWidth = ENEMY_SHADOW_BASE_W + shadowScale * 22;
         const shadowHeight = ENEMY_SHADOW_BASE_H + shadowScale * 10;
         const shadowAlpha = ENEMY_SHADOW_MIN_ALPHA + shadowScale * (ENEMY_SHADOW_MAX_ALPHA - ENEMY_SHADOW_MIN_ALPHA);
         gfx.fillStyle(SHADOW, shadowAlpha);
-        gfx.fillEllipse(this.x, this.y + bodySize * 0.1, shadowWidth, shadowHeight);
+        gfx.fillEllipse(this.x, this.y + bodySize * 0.3, shadowWidth, shadowHeight);
 
         // 禁區發光
         if (this.y >= DANGER_ZONE_TOP_Y && !this.isDead) {
@@ -632,9 +611,10 @@ function speedMultiplierForLevel(level) {
   
     preload() {
       this.load.image('background_arena', 'assets/background_arena.png');
-      // slime: atlas 動畫
-      this.load.atlas('slime', 'assets/slime1sheet.png', 'assets/slime1sheet.json');
-      // shroom: 暫時保留舊圖片
+      this.load.image('slime_idle', 'assets/slime1.png');
+      this.load.image('slime_hop', 'assets/slime2.png');
+      this.load.image('slime_hit', 'assets/slime3.png');
+      this.load.image('slime_death', 'assets/slime4.png');
       this.load.image('shroom_idle', 'assets/shroom1.png');
       this.load.image('shroom_hop', 'assets/shroom2.png');
       this.load.image('shroom_hit', 'assets/shroom3.png');
@@ -653,12 +633,6 @@ function speedMultiplierForLevel(level) {
         this.gfx.setDepth(0);
         this.hudGfx = this.add.graphics();
         this.hudGfx.setDepth(60);
-
-        // Slime 動畫註冊
-        this.anims.create({ key: 'slime_idle', frames: [{ key: 'slime', frame: 'idle' }], frameRate: 1, repeat: -1 });
-        this.anims.create({ key: 'slime_hop', frames: this.anims.generateFrameNames('slime', { frames: ['move_01 crouch', 'move_02 jump', 'move_03 landing', 'move_04 recovery'] }), frameRate: 10, repeat: -1 });
-        this.anims.create({ key: 'slime_hit', frames: this.anims.generateFrameNames('slime', { frames: ['hit_01', 'hit_02'] }), frameRate: 8, repeat: 0 });
-        this.anims.create({ key: 'slime_death', frames: this.anims.generateFrameNames('slime', { frames: ['death_01', 'death_02', 'death_03', 'death_04'] }), frameRate: 6, repeat: 0 });
       this.hudText = this.add.text(16, 14, 'Score: 0', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setDepth(70);
       this.levelText = this.add.text(HUD_LEVEL_TEXT_X, HUD_LEVEL_TEXT_Y, 'Level: 1', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(0.5, 0).setDepth(70);
       this.debugText = this.add.text(16, 48, '', { fontFamily: 'Arial', fontSize: '18px', color: '#f0f0f0' }).setDepth(70);
@@ -743,6 +717,7 @@ function speedMultiplierForLevel(level) {
     showCardPicker() {
       this.isCardPicking = true;
 
+      // 從卡池過濾出可選卡片，隨機取 3 張
       const available = CARD_POOL.filter(card =>
         !card.canPick || card.canPick(this)
       );
@@ -751,16 +726,18 @@ function speedMultiplierForLevel(level) {
 
       const els = [];
 
-      // 遮罩放最頂端
-      const overlay = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x000000, 0.82).setDepth(200).setInteractive();
+      // 半透明遮罩
+      const overlay = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x000000, 0.72).setDepth(95).setInteractive();
       els.push(overlay);
 
+      // 標題
       const title = this.add.text(WIDTH / 2, 120, '選擇升級', {
         fontFamily: 'Arial', fontSize: '40px', color: '#ffe066',
         stroke: '#000000', strokeThickness: 4,
-      }).setOrigin(0.5).setDepth(201);
+      }).setOrigin(0.5).setDepth(96);
       els.push(title);
 
+      // 卡片按鈕（3 張垂直排列）
       const cardW = 300;
       const cardH = 110;
       const startY = 230;
@@ -770,15 +747,15 @@ function speedMultiplierForLevel(level) {
         const cy = startY + i * gap;
 
         const bg = this.add.rectangle(WIDTH / 2, cy, cardW, cardH, 0x1a2a4a, 1)
-          .setDepth(201).setStrokeStyle(2, 0x5ad2f0).setInteractive({ useHandCursor: true });
+          .setDepth(96).setStrokeStyle(2, 0x5ad2f0).setInteractive({ useHandCursor: true });
 
         const labelText = this.add.text(WIDTH / 2, cy - 18, card.label, {
           fontFamily: 'Arial', fontSize: '26px', color: '#f0f0f0',
-        }).setOrigin(0.5).setDepth(202);
+        }).setOrigin(0.5).setDepth(97);
 
         const descText = this.add.text(WIDTH / 2, cy + 22, card.desc, {
           fontFamily: 'Arial', fontSize: '20px', color: '#aac8e0',
-        }).setOrigin(0.5).setDepth(202);
+        }).setOrigin(0.5).setDepth(97);
 
         bg.on('pointerover', () => bg.setFillStyle(0x2e4a7a));
         bg.on('pointerout', () => bg.setFillStyle(0x1a2a4a));
@@ -798,7 +775,7 @@ function speedMultiplierForLevel(level) {
       for (const el of this.cardUiElements) { el.destroy(); }
       this.cardUiElements = [];
       this.isCardPicking = false;
-      // 不再呼叫 startNextLevel，卡片與關卡進度無關
+      this.startNextLevel();
     }
 
     // Debug 用：直接套用指定卡片
@@ -1116,6 +1093,8 @@ function speedMultiplierForLevel(level) {
 
   update(time, delta) {
     const dt = delta / 1000;
+
+    if (this.isCardPicking) return;
 
       if (!this.gameOver) {
         this.playTime += dt;
