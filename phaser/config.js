@@ -302,6 +302,9 @@ const WEAPON_VISUAL_CONFIG = {
 // ============================================================
 const MIN_FLICK_DISTANCE = 20;
 const MIN_GESTURE_DURATION = 0.03;
+// 速度傷害乘數
+const SPEED_DAMAGE_MIN_MULTIPLIER = 0.3;  // 最低速對應傷害乘數
+const SPEED_DAMAGE_MAX_MULTIPLIER = 2.0;  // 最高速對應傷害乘數
 const SPEED_MULTIPLIER = 1.0;
 const PERFECT_RELEASE_SPEED_MIN = 680;
 const PERFECT_RELEASE_SPEED_MAX = 920;
@@ -343,6 +346,23 @@ const HUD_AMMO_SEGMENT_HEIGHT = 12;
 const HUD_AMMO_SEGMENT_GAP = 4;
 const HUD_AMMO_BAR_GAP = 16;
 const HUD_AMMO_LABEL_COLOR = 0xf0f0f0;
+
+// Hit Gauge（右側直立）
+const HUD_HIT_GAUGE_X = WIDTH - 28;   // 右側，對稱彈藥條
+const HUD_HIT_GAUGE_Y = 90;           // 同彈藥條頂部
+const HUD_HIT_GAUGE_WIDTH = 12;
+const HUD_HIT_GAUGE_MAX_HEIGHT = 160; // 最大條長
+
+// 連擊提示
+const HUD_COMBO_X = WIDTH - 28;
+const HUD_COMBO_Y = 64;
+
+// 晶核血條（左下角橫放）
+const HUD_HP_BAR_X = 16;
+const HUD_HP_BAR_Y = HEIGHT - 44;
+const HUD_HP_BAR_SEGMENT_W = 22;
+const HUD_HP_BAR_SEGMENT_H = 14;
+const HUD_HP_BAR_SEGMENT_GAP = 5;
 
 // ============================================================
 // DANGER ZONE
@@ -399,6 +419,7 @@ const CARD_POOL = [
       scene.weaponAmmo.twin.maxAmmo += 1;
       scene.weaponAmmo.twin.currentAmmo += 1;
     },
+    canPick(scene) { return scene.unlockedWeapons.twin === true; },
   },
   {
     id: 'ammo_bomb',
@@ -409,6 +430,7 @@ const CARD_POOL = [
       scene.weaponAmmo.bomb.maxAmmo += 1;
       scene.weaponAmmo.bomb.currentAmmo += 1;
     },
+    canPick(scene) { return scene.unlockedWeapons.bomb === true; },
   },
   {
     id: 'recharge_normal',
@@ -427,6 +449,7 @@ const CARD_POOL = [
     apply(scene) {
       scene.weaponAmmo.twin.ammoRechargeSeconds *= 0.85;
     },
+    canPick(scene) { return scene.unlockedWeapons.twin === true; },
   },
   {
     id: 'recharge_all',
@@ -460,6 +483,7 @@ const CARD_POOL = [
     apply(scene) {
       scene.bombRadiusMultiplier = (scene.bombRadiusMultiplier || 1) * 1.2;
     },
+    canPick(scene) { return scene.unlockedWeapons.bomb === true; },
   },
   {
     id: 'unlock_twin',
@@ -492,7 +516,7 @@ const CARD_POOL = [
 // ============================================================
 // DEBUG
 // ============================================================
-const DEBUG_PANEL_VISIBLE = false; // 改成 false 可隱藏 debug 面板
+const DEBUG_PANEL_VISIBLE = true; // 改成 false 可隱藏 debug 面板
 
 // ============================================================
 // HIT GAUGE (抽卡累積機制)
