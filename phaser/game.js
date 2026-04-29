@@ -1,4 +1,4 @@
-// All config loaded from config.js
+﻿// All config loaded from config.js
 
 function distancePointToSegment(px, py, x1, y1, x2, y2) {
   const dx = x2 - x1;
@@ -52,19 +52,8 @@ function distancePointToSegment(px, py, x1, y1, x2, y2) {
     ];
   }
 
-  function createWeaponAmmoState() {
-    const state = {};
-    for (const [weaponType, weapon] of Object.entries(WEAPON_TYPES)) {
-      state[weaponType] = {
-        maxAmmo: weapon.maxAmmo,
-        currentAmmo: weapon.maxAmmo,
-        ammoRechargeSeconds: weapon.ammoRechargeSeconds,
-        rechargeTimer: 0,
-        ammoCostPerShot: weapon.ammoCostPerShot,
-      };
-    }
-    return state;
-  }
+  // @deprecated ??replaced by createSkillCooldownState()
+  function createWeaponAmmoState() { return {}; }
 
 function spawnIntervalForLevel(level) {
   return Math.max(ENEMY_SPAWN_MIN_MS, ENEMY_SPAWN_MS - (level - 1) * ENEMY_SPAWN_STEP_MS);
@@ -195,7 +184,7 @@ function speedMultiplierForLevel(level) {
     }
 
     updateInZone(dt) {
-      // Y 固定在防線，X 往中心靠
+      // Move toward the center X inside the zone.
       const targetX = WIDTH / 2;
       const speed = 60 * dt;
       if (Math.abs(this.x - targetX) > speed) {
@@ -205,7 +194,7 @@ function speedMultiplierForLevel(level) {
       }
       this.y = DEFENSE_LINE_Y - this.displayedRadius();
 
-      // 繼續播 hop 動畫（視覺用）
+      // Hop movement update.
       const mv = this.type.movement;
       if (mv && mv.movementType === 'hop') {
         if (this.hitStunTimer > 0) {
@@ -237,7 +226,8 @@ function speedMultiplierForLevel(level) {
             this.hopScaleX = 1;
             this.hopScaleY = 1;
             this.hopState = 'CHARGING';
-            // 落地攻擊晶核
+            this.scene.playSfx('hop_land');
+            // Apply one HP on landing hit.
             if (!this.scene.debugGodMode) this.scene.hp -= 1;
           }
         }
@@ -290,7 +280,7 @@ function speedMultiplierForLevel(level) {
         this.hopVisualOffsetY = 0;
         if (this.hopTimer >= this.hopChargeDuration) {
           this.hopTimer = 0;
-          // 每跳重新抽距離和側飄
+          // Prepare the next hop arc.
           this.hopDistance = Phaser.Math.FloatBetween(mv.hopDistanceMin, mv.hopDistanceMax) * speedScale;
           this.hopLateralDrift = Phaser.Math.FloatBetween(mv.lateralDriftMin, mv.lateralDriftMax);
           this.hopDuration = Phaser.Math.FloatBetween(mv.hopDurationMin, mv.hopDurationMax);
@@ -303,7 +293,7 @@ function speedMultiplierForLevel(level) {
         const t = Math.min(this.hopTimer / this.hopDuration, 1);
         this.y = this.hopStartY + this.hopDistance * t;
         this.x = this.hopStartX + this.hopLateralDrift * t;
-        // 拋物線弧高
+        // Arc lift while airborne.
         this.hopVisualOffsetY = -mv.jumpArcHeight * Math.sin(Math.PI * t);
         this.hopScaleX = mv.stretchScaleX;
         this.hopScaleY = mv.stretchScaleY;
@@ -323,6 +313,7 @@ function speedMultiplierForLevel(level) {
           this.hopScaleX = 1;
           this.hopScaleY = 1;
           this.hopState = 'CHARGING';
+          this.scene.playSfx('hop_land');
         }
       }
 
@@ -369,20 +360,20 @@ function speedMultiplierForLevel(level) {
       const bodyHeight = bodySize * 0.94 * scaleY;
       const bodyTop = visualY - bodyHeight / 2;
 
-      // slime sprite 顯示
+      // Draw the slime sprite when available.
       const mv = this.type.movement;
       const spritePrefix = this.getSpritePrefix();
       if (mv && mv.movementType === 'hop' && this.scene.textures.exists(spritePrefix + '_idle')) {
         const spriteKey = this.getSlimeSpriteKey();
         if (!this.slimeSprite) {
-          this.slimeSprite = this.scene.add.image(this.x, visualY, spriteKey).setDepth(10);
+          this.slimeSprite = this.scene.add.image(this.x, visualY, spriteKey).setDepth(10 + this.y * 0.01);
         }
         const displaySize = bodySize * 1.8 * this.visualScale();
         this.slimeSprite.setTexture(spriteKey);
         this.slimeSprite.setPosition(this.x, visualY);
         this.slimeSprite.setDisplaySize(displaySize * scaleX, displaySize * scaleY);
-        this.slimeSprite.setDepth(10 + this.y);
-        // 影子
+        this.slimeSprite.setDepth(10 + this.y * 0.01);
+        // Shadow under the sprite.
         const shadowScale = this.visualScale();
         const shadowWidth = ENEMY_SHADOW_BASE_W + shadowScale * 22;
         const shadowHeight = ENEMY_SHADOW_BASE_H + shadowScale * 10;
@@ -390,14 +381,6 @@ function speedMultiplierForLevel(level) {
         gfx.fillStyle(SHADOW, shadowAlpha);
         gfx.fillEllipse(this.x, this.y + bodySize * 0.3, shadowWidth, shadowHeight);
 
-        // 禁區發光
-        if (this.y >= DANGER_ZONE_TOP_Y && !this.isDead) {
-          const glowRadius = (displaySize / 2) + DANGER_GLOW_RADIUS_EXTRA;
-          gfx.fillStyle(DANGER_GLOW_COLOR, DANGER_GLOW_ALPHA * 0.3);
-          gfx.fillCircle(this.x, visualY, glowRadius + 6);
-          gfx.lineStyle(2, DANGER_GLOW_COLOR, DANGER_GLOW_ALPHA);
-          gfx.strokeCircle(this.x, visualY, glowRadius);
-        }
         return;
       }
       const sideRadius = Math.max(5, bodyWidth * 0.16);
@@ -433,11 +416,11 @@ function speedMultiplierForLevel(level) {
   }
 
   class Projectile {
-    constructor(scene, startX, startY, directionX, directionY, speed, weaponType) {
+    constructor(scene, startX, startY, directionX, directionY, speed, slot) {
       this.scene = scene;
-      this.weaponType = weaponType;
-      this.weapon = WEAPON_TYPES[weaponType] || WEAPON_TYPES.normal;
-      this.visual = WEAPON_VISUAL_CONFIG[weaponType] || WEAPON_VISUAL_CONFIG.normal;
+      this.weaponType = slot; // 'main' or 'sub'
+      this.weapon = slot === 'sub' ? SUB_WEAPON_CONFIG : MAIN_WEAPON_CONFIG;
+      this.visual = PROJECTILE_VISUAL_CONFIG[slot] || PROJECTILE_VISUAL_CONFIG.main;
       this.sprite = null;
       this.perfect = false;
       this.groundX = startX;
@@ -449,8 +432,13 @@ function speedMultiplierForLevel(level) {
     this.landedHitApplied = false;
     this.landedMissApplied = false;
     this.hasHit = false;
-      this.vx = directionX * speed * HORIZONTAL_SPEED_MULTIPLIER;
-      this.vy = directionY * speed * HORIZONTAL_SPEED_MULTIPLIER;
+    this.forcedLandX = null;
+    this.forcedLandY = null;
+    this.isPowerShot = false;
+    this.damageMultiplier = 1;
+      const hMult = slot === 'main' ? 1 : HORIZONTAL_SPEED_MULTIPLIER;
+      this.vx = directionX * speed * hMult;
+      this.vy = directionY * speed * hMult;
       this.vz = this.weapon.hasArc ? Math.max(this.weapon.arcMinUpwardSpeed, speed * this.weapon.arcInitialVerticalMultiplier) : 0;
       this.radius = this.weapon.projectileRadius;
       this.spawnSpriteIfAvailable();
@@ -473,6 +461,22 @@ function speedMultiplierForLevel(level) {
     }
     this.prevGroundX = this.groundX;
     this.prevGroundY = this.groundY;
+
+      // Forced land follows a fixed arc height over time.
+    if (this.forcedLandX != null && this.weapon.hasArc) {
+      this.flightTimer = (this.flightTimer || 0) + dt;
+      const totalTime = this.forcedFlightTime || 1.0;
+      const t = Math.min(this.flightTimer / totalTime, 1);
+      this.groundX = this.forcedStartX + (this.forcedLandX - this.forcedStartX) * t;
+      this.groundY = this.forcedStartY + (this.forcedLandY - this.forcedStartY) * t;
+      this.height = Math.sin(t * Math.PI) * (this.forcedArcHeight || 80);
+      if (t >= 1) {
+        this.height = 0;
+        this.landed = true;
+      }
+      return this.landed;
+    }
+
     this.groundX += this.vx * dt;
     this.groundY += this.vy * dt;
     if (!this.weapon.hasArc) {
@@ -525,15 +529,17 @@ function speedMultiplierForLevel(level) {
         this.sprite.setPosition(x, y);
         this.sprite.setRotation(angle + rotationOffset);
         this.sprite.setVisible(true);
-        this.sprite.setDisplaySize(this.visual.displayWidth, this.visual.displayHeight);
-        this.sprite.setTint(this.perfect ? 0xfff2a8 : 0xffffff);
+        const psScale = this.isPowerShot ? 1.4 : 1;
+        this.sprite.setDisplaySize(this.visual.displayWidth * psScale, this.visual.displayHeight * psScale);
+        this.sprite.setTint(this.isPowerShot ? 0xff9900 : (this.perfect ? 0xfff2a8 : 0xffffff));
         this.sprite.setAlpha((this.visual.alpha ?? 1) * (this.landed ? 0.92 : 1));
         return;
       }
-      if (this.weaponType === 'normal') {
+      if (this.weaponType === 'main') {
+        const powerScale = this.isPowerShot ? 1.45 : 1;
         const angle = Math.atan2(this.vy || (y - this.prevGroundY), this.vx || (x - this.prevGroundX));
-        const length = Math.max(12, this.radius * (this.perfect ? 3.7 : 3.2));
-        const width = Math.max(5, Math.round(this.radius * (this.perfect ? 1.05 : 0.85)));
+        const length = Math.max(12, this.radius * 3.2 * powerScale);
+        const width = Math.max(5, Math.round(this.radius * 0.85 * powerScale));
         const tipX = x + Math.cos(angle) * length * 0.5;
         const tipY = y + Math.sin(angle) * length * 0.5;
         const tailX = x - Math.cos(angle) * length * 0.5;
@@ -542,17 +548,19 @@ function speedMultiplierForLevel(level) {
         const rightAngle = angle - Math.PI / 2;
         const finX = tailX - Math.cos(angle) * 4;
         const finY = tailY - Math.sin(angle) * 4;
-        gfx.lineStyle(width, this.perfect ? 0xffffff : (this.landed ? LANDED_PROJECTILE_STROKE : WHITE), 1);
+        const lineColor = this.isPowerShot ? 0xff9900 : (this.landed ? LANDED_PROJECTILE_STROKE : WHITE);
+        const dartColor = this.isPowerShot ? 0xff6600 : (this.landed ? LANDED_PROJECTILE_FILL : CYAN);
+        gfx.lineStyle(width, lineColor, 1);
         gfx.lineBetween(tailX, tailY, tipX, tipY);
-        gfx.fillStyle(this.perfect ? 0xfff7b8 : (this.landed ? LANDED_PROJECTILE_FILL : CYAN), 1);
+        gfx.fillStyle(dartColor, 1);
         gfx.fillTriangle(
           tipX, tipY,
           tailX + Math.cos(leftAngle) * width, tailY + Math.sin(leftAngle) * width,
           tailX + Math.cos(rightAngle) * width, tailY + Math.sin(rightAngle) * width,
         );
-        gfx.fillStyle(this.perfect ? 0xffffff : 0xffffff, this.landed ? 0.18 : (this.perfect ? 0.4 : 0.28));
+        gfx.fillStyle(0xffffff, this.landed ? 0.18 : (this.isPowerShot ? 0.45 : 0.28));
         gfx.fillCircle(tipX, tipY, Math.max(2, width * 0.34));
-        gfx.lineStyle(2, this.perfect ? 0xfff7b8 : (this.landed ? LANDED_PROJECTILE_STROKE : WHITE), 0.9);
+        gfx.lineStyle(2, lineColor, 0.9);
         gfx.lineBetween(finX, finY, tailX, tailY);
       } else {
           const fillColor = this.perfect ? 0xfff7b8 : (this.landed ? LANDED_PROJECTILE_FILL : this.visual.fallbackColor);
@@ -572,25 +580,32 @@ function speedMultiplierForLevel(level) {
       this.projectiles = [];
       this.landingEffects = [];
       this.perfectPopups = [];
+      this.damagePopups = [];
+      this.healthPots = [];
       this.score = 0;
-    this.hp = 5;
+    this.hp = PLAYER_HP_START;
+    this.maxHp = PLAYER_HP_START;
     this.gameOver = false;
     this.spawnTimer = 0;
     this.playTime = 0;
       this.currentLevel = 1;
       this.levelSpeedMultiplier = 1;
-      this.weaponAmmo = createWeaponAmmoState();
-      this.isAiming = false;
-      this.aimStart = null;
-      this.aimStartTime = 0;
+      this.skillCooldowns = createSkillCooldownState();
+      this.skillBtnObjects = {};
+      this.joystickLeft  = null;
+      this.joystickMain = null;
+      this.pendingCrystalGesture = null;
+      this.lightningCooldown = 0;
         this.lastFiredWeaponType = 'none';
         this.lastSpawnedProjectileCount = 0;
         this.slashCooldown = 0;
         this.slashEffects = [];
+        this.passiveWeaponTickTimer = 0;
+        this.passiveWeaponEffects = [];
         this.debugSpawnMultiplier = 1.0;
         this.debugSpeedMultiplier = 1.0;
         this.debugGodMode = false;
-        this.debugAllowedTypes = null; // null = 全部，array = 只生成指定類型
+        this.debugAllowedTypes = null; // null = all types, array = allowed types
         // Wave / level system
         this.enemiesSpawnedThisLevel = 0;
         this.enemiesToSpawnThisLevel = ENEMIES_PER_LEVEL_BASE;
@@ -598,18 +613,36 @@ function speedMultiplierForLevel(level) {
         // Card system
         this.isCardPicking = false;
         this.cardHpCount = 0;
-        this.bombRadiusMultiplier = 1;
-        this.unlockedWeapons = { normal: true, twin: false, bomb: false };
+        this.unlockedWeapons = { sub: true };
+        // Upgrade state — main weapon (additive, start at 0; applied as base × (1 + bonus))
+        this.mainDamageBonus = 0.0;
+        this.mainFireRateBonus = 0.0;
+        this.mainKnockbackLevel = 0;   // behavior pending
+        this.mainMultishotLevel = 0;   // behavior pending
+        this.mainPowerShotLevel = 0;   // behavior pending
+        this.mainShotCounter = 0;      // for power shot tracking
+        // Upgrade state — sub weapon (additive, start at 0)
+        this.subDamageBonus = 0.0;
+        this.subCooldownBonus = 0.0;
+        this.subRangeBonus = 0.0;
+        this.subPullLevel = 0;         // behavior pending
+        // Upgrade state — passive weapon (additive, start at 0)
+        this.passiveDamageBonus = 0.0;
+        this.passiveFireRateBonus = 0.0;
+        this.passiveMultitargetBonus = 0.0; // unused legacy field, kept for reset safety
+        this.passiveMultitargetLevel = 0;
         this.cardUiElements = [];
-        // Weapon switch
-        this.currentWeaponType = 'normal';
         // Bomb explosions
         this.bombExplosionEffects = [];
         // Hit gauge
         this.hitGauge = 0;
-        this.hitGaugeCardCount = 0; // 已觸發幾次抽卡
-        // 連擊
+        this.hitGaugeCardCount = 0; // Hit gauge card count.
+        // Combo
         this.comboCount = 0;
+        this.audioUnlocked = false;
+        this.bgmStarted = false;
+        this.gameStarted = false;
+        this.startOverlayElements = [];
     }
   
     preload() {
@@ -622,8 +655,25 @@ function speedMultiplierForLevel(level) {
       this.load.image('shroom_hop', 'assets/shroom2.png');
       this.load.image('shroom_hit', 'assets/shroom3.png');
       this.load.image('shroom_death', 'assets/shroom4.png');
-      for (const visual of Object.values(WEAPON_VISUAL_CONFIG)) {
+      for (const visual of Object.values(PROJECTILE_VISUAL_CONFIG)) {
         this.load.image(visual.assetKey, visual.assetPath);
+      }
+      // Audio assets.
+      const soundFiles = {
+        bgm:         'assets/sound/bgm.mp3',
+        shoot:       'assets/sound/shoot.mp3',
+        shoot_bomb:  'assets/sound/shoot_bomb.mp3',
+        hit:         'assets/sound/hit.mp3',
+        hop_land:    'assets/sound/hop_land.mp3',
+        enemy_death: 'assets/sound/enemy_death.mp3',
+        explosion:   'assets/sound/explosion.mp3',
+      };
+      this._soundKeysToLoad = new Set(Object.keys(soundFiles));
+      this.load.on('loaderror', (file) => {
+        this._soundKeysToLoad.delete(file.key);
+      });
+      for (const [key, path] of Object.entries(soundFiles)) {
+        this.load.audio(key, path);
       }
     }
 
@@ -634,8 +684,25 @@ function speedMultiplierForLevel(level) {
           .setDepth(-1000);
         this.gfx = this.add.graphics();
         this.gfx.setDepth(0);
+        // Audio settings.
+        const sfxConfig = {
+          bgm:         { loop: true,  volume: 0.4 },
+          shoot:       { loop: false, volume: 0.6 },
+          shoot_bomb:  { loop: false, volume: 0.7 },
+          hit:         { loop: false, volume: 0.7 },
+          hop_land:    { loop: false, volume: 0.35 },
+          enemy_death: { loop: false, volume: 0.6 },
+          explosion:   { loop: false, volume: 0.8 },
+        };
+        this.sfx = {};
+        for (const [key, cfg] of Object.entries(sfxConfig)) {
+          if (this._soundKeysToLoad && this._soundKeysToLoad.has(key)) {
+            try { this.sfx[key] = this.sound.add(key, cfg); } catch(e) {}
+          }
+        }
         this.hudGfx = this.add.graphics();
         this.hudGfx.setDepth(60);
+        this.healthPotGfx = this.add.graphics().setDepth(30);
       this.hudText = this.add.text(16, 14, 'Score: 0', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setDepth(70);
       this.levelText = this.add.text(HUD_LEVEL_TEXT_X, HUD_LEVEL_TEXT_Y, 'Level: 1', { fontFamily: 'Arial', fontSize: '30px', color: '#f0f0f0' }).setOrigin(0.5, 0).setDepth(70);
       this.debugText = this.add.text(16, 48, '', { fontFamily: 'Arial', fontSize: '18px', color: '#f0f0f0' }).setDepth(70);
@@ -645,29 +712,55 @@ function speedMultiplierForLevel(level) {
     this.gameOverText.setVisible(false);
     this.finalScoreText.setVisible(false);
 
-    // 武器切換按鈕
-    this.weaponSwitchBtn = this.add.text(HUD_AMMO_X, HUD_AMMO_Y + 200, '主武器', {
-      fontFamily: 'Arial', fontSize: '16px', color: '#5bc0ff',
-      backgroundColor: '#1a2a3a', padding: { x: 8, y: 6 },
-    }).setDepth(70).setInteractive({ useHandCursor: true });
-    this.weaponSwitchBtn.on('pointerup', () => { this.cycleWeapon(); });
-    this.updateWeaponSwitchBtn();
+    // Skill buttons and cooldown UI.
+    this.aimGfx = this.add.graphics().setDepth(65);
+    this.lightningGfx = this.add.graphics().setDepth(85);
 
-    // Hit Gauge（右側，直立進度條）
+    const skillWeapons = ['sub'];
+    let skillBtnY = HUD_SKILL_BTN_Y;
+    for (const wtype of skillWeapons) {
+      const bx = HUD_SKILL_BTN_X;
+      const by = skillBtnY;
+      const bw = HUD_SKILL_BTN_W;
+      const bh = HUD_SKILL_BTN_H;
+
+      const bg = this.add.rectangle(bx + bw / 2, by + bh / 2, bw, bh, 0x1a2a3a, 1)
+        .setDepth(70).setStrokeStyle(2, 0x444444).setInteractive({ useHandCursor: true });
+
+      const nameText = this.add.text(bx + bw / 2, by + 14, wtype.toUpperCase(), {
+        fontFamily: 'Arial', fontSize: '14px', color: '#888888', fontStyle: 'bold',
+      }).setOrigin(0.5).setDepth(71);
+
+      const cdText = this.add.text(bx + bw / 2, by + 34, 'LOCK', {
+        fontFamily: 'Arial', fontSize: '11px', color: '#666666',
+      }).setOrigin(0.5).setDepth(71);
+
+      const cdBarBg = this.add.rectangle(bx + 4, by + bh - 7, bw - 8, 4, 0x222222, 1)
+        .setDepth(71).setOrigin(0, 0);
+      const cdBar = this.add.rectangle(bx + 4, by + bh - 7, bw - 8, 4, 0x5bc0ff, 1)
+        .setDepth(72).setOrigin(0, 0);
+
+      bg.on('pointerup', () => { this.onSkillBtnClick(wtype); });
+
+      this.skillBtnObjects[wtype] = { bg, nameText, cdText, cdBar, cdBarBg };
+      skillBtnY += HUD_SKILL_BTN_H + HUD_SKILL_BTN_GAP;
+    }
+
+    // Hit gauge UI.
     this.hitGaugeGfx = this.add.graphics().setDepth(70);
     this.hitGaugeLabel = this.add.text(HUD_HIT_GAUGE_X + 6, HUD_HIT_GAUGE_Y + HUD_HIT_GAUGE_MAX_HEIGHT + 6, '', {
       fontFamily: 'Arial', fontSize: '11px', color: '#aaddff',
     }).setOrigin(0.5, 0).setDepth(70);
 
-    // 連擊文字（右側 Hit Gauge 上方）
+    // Combo text hidden until active.
     this.comboText = this.add.text(HUD_COMBO_X + 6, HUD_COMBO_Y, '', {
       fontFamily: 'Arial', fontSize: '22px', color: '#ffe066',
       stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5, 1).setDepth(70).setVisible(false);
 
-    // 晶核血條（左下角橫放）
+    // HP bar label.
     this.hpBarGfx = this.add.graphics().setDepth(70);
-    this.hpBarLabel = this.add.text(HUD_HP_BAR_X, HUD_HP_BAR_Y - 18, '晶核', {
+    this.hpBarLabel = this.add.text(HUD_HP_BAR_X, HUD_HP_BAR_Y - 18, 'Core', {
       fontFamily: 'Arial', fontSize: '13px', color: '#ff8888',
     }).setDepth(70);
 
@@ -676,7 +769,7 @@ function speedMultiplierForLevel(level) {
     this.levelClearText = this.add.text(WIDTH / 2, HEIGHT / 2 - 60, 'CLEAR', {
       fontFamily: 'Arial', fontSize: '96px', color: '#ffe066', stroke: '#000000', strokeThickness: 6,
     }).setOrigin(0.5).setDepth(91).setVisible(false);
-    this.levelClearBtn = this.add.text(WIDTH / 2, HEIGHT / 2 + 60, '繼續', {
+    this.levelClearBtn = this.add.text(WIDTH / 2, HEIGHT / 2 + 60, 'Continue', {
       fontFamily: 'Arial', fontSize: '48px', color: '#f0f0f0',
       backgroundColor: '#2e6adf', padding: { x: 36, y: 16 },
     }).setOrigin(0.5).setDepth(91).setVisible(false).setInteractive({ useHandCursor: true });
@@ -687,99 +780,280 @@ function speedMultiplierForLevel(level) {
       this.startNextLevel();
     });
 
-    this.input.on('pointerdown', (pointer) => {
-      if (this.gameOver || this.isLevelClear || this.isCardPicking) return;
-      this.isAiming = true;
-      this.aimStart = { x: pointer.x, y: pointer.y };
-      this.aimStartTime = this.time.now / 1000;
+    const startOverlayBg = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x000000, 0.72)
+      .setDepth(200)
+      .setInteractive({ useHandCursor: true });
+    const startOverlayTitle = this.add.text(WIDTH / 2, HEIGHT / 2 - 18, 'Tap to Start', {
+      fontFamily: 'Arial',
+      fontSize: '42px',
+      color: '#f0f0f0',
+      stroke: '#000000',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(201);
+    const startOverlaySubtitle = this.add.text(WIDTH / 2, HEIGHT / 2 + 26, 'Audio unlock / start game', {
+      fontFamily: 'Arial',
+      fontSize: '18px',
+      color: '#d8dde3',
+    }).setOrigin(0.5).setDepth(201);
+    this.startOverlayElements = [startOverlayBg, startOverlayTitle, startOverlaySubtitle];
+    startOverlayBg.on('pointerup', () => {
+      if (this.gameStarted) return;
+      this.unlockAudioOnce();
+      if (!this.bgmStarted) {
+        this.bgmStarted = true;
+        try {
+          if (this.sfx && this.sfx.bgm && !this.sfx.bgm.isPlaying) {
+            this.sfx.bgm.play();
+          }
+        } catch (e) {}
+      }
+      for (const element of this.startOverlayElements) {
+        if (element && typeof element.destroy === 'function') {
+          element.destroy();
+        }
+      }
+      this.startOverlayElements = [];
+      this.gameStarted = true;
     });
 
-    this.input.on('pointerup', (pointer) => {
-      if (this.gameOver || this.isLevelClear || this.isCardPicking || !this.isAiming || !this.aimStart) return;
-      this.isAiming = false;
-      const aimEnd = { x: pointer.x, y: pointer.y };
-      const dx = aimEnd.x - this.aimStart.x;
-      const dy = aimEnd.y - this.aimStart.y;
-      const dragDistance = Math.hypot(dx, dy);
+    this.input.on('pointerdown', (pointer) => {
+      if (!this.gameStarted) return;
 
-      // 起點在禁區內 → flick
-      if (this.aimStart.y >= DANGER_ZONE_TOP_Y) {
-        if (dragDistance >= MIN_FLICK_DISTANCE) {
-          const length = Math.hypot(dx, dy);
-          if (length > 0) {
-            const directionX = dx / length;
-            const directionY = dy / length;
-            const releaseTime = this.time.now / 1000;
-            const dragDuration = Math.max(releaseTime - this.aimStartTime, MIN_GESTURE_DURATION);
-            const gestureSpeed = dragDistance / dragDuration;
-            const isPerfectRelease = gestureSpeed >= PERFECT_RELEASE_SPEED_MIN && gestureSpeed <= PERFECT_RELEASE_SPEED_MAX;
-            this.spawnWeaponProjectiles(aimEnd.x, aimEnd.y, directionX, directionY, gestureSpeed, isPerfectRelease);
-          }
+      // Tap unlocks audio before the first pointerdown is handled.
+
+      if (this.gameOver || this.isLevelClear || this.isCardPicking) return;
+
+      // Health potion pickup.
+      for (let i = this.healthPots.length - 1; i >= 0; i--) {
+        const pot = this.healthPots[i];
+        if (Phaser.Math.Distance.Between(pointer.x, pointer.y, pot.x, pot.y) <= HEALTH_POT_RADIUS * 1.5) {
+          const maxHp = this.maxHp || PLAYER_HP_START;
+          if (this.hp < maxHp) this.hp = Math.min(this.hp + HEALTH_POT_HEAL, maxHp);
+          pot.label.destroy();
+          this.healthPots.splice(i, 1);
+          return;
         }
-        this.aimStart = null;
+      }
+
+      const jsCfg = window.DEBUG_JOYSTICK || {};
+      const crystalX     = (jsCfg.crystalX  ?? JOYSTICK_CRYSTAL_X)   * WIDTH;
+      const crystalY     = (jsCfg.crystalY  ?? JOYSTICK_CRYSTAL_Y)   * HEIGHT;
+      const crystalRadius = JOYSTICK_CRYSTAL_RADIUS * WIDTH;
+      const leftXMax     = (jsCfg.leftXMax  ?? JOYSTICK_LEFT_X_MAX)  * WIDTH;
+      const mainXMin     = (jsCfg.mainXMin ?? jsCfg.rightXMin ?? JOYSTICK_MAIN_X_MIN) * WIDTH;
+      const zoneYMin     = (jsCfg.zoneYMin  ?? JOYSTICK_ZONE_Y_MIN)  * HEIGHT;
+      const zoneYMax     = (jsCfg.zoneYMax  ?? JOYSTICK_ZONE_Y_MAX)  * HEIGHT;
+
+      // 1. Crystal tap.
+      if (Phaser.Math.Distance.Between(pointer.x, pointer.y, crystalX, crystalY) <= crystalRadius) {
+        this.pendingCrystalGesture = {
+          pointerId: pointer.id,
+          startX: pointer.x,
+          startY: pointer.y,
+          currentX: pointer.x,
+          currentY: pointer.y,
+        };
         return;
       }
 
-      // 否則斬殺（起點在禁區外，終點必須在禁區內）
-      if (dragDistance >= MIN_FLICK_DISTANCE && aimEnd.y >= DANGER_ZONE_TOP_Y) {
-        this.applySlash(this.aimStart.x, this.aimStart.y, aimEnd.x, aimEnd.y);
+      // 2. Main weapon drag gesture.
+      if (pointer.x >= mainXMin && pointer.y >= zoneYMin && pointer.y <= zoneYMax) {
+        this.joystickMain = {
+          startX: pointer.x, startY: pointer.y,
+          currentPointerX: pointer.x, currentPointerY: pointer.y,
+          fireTimer: NORMAL_FIRE_RATE, // Keep the fire cadence.
+        };
+        return;
       }
-      this.aimStart = null;
+
+      // 3. Left tower auto-attack.
+      if (pointer.x < leftXMax && pointer.y >= zoneYMin && pointer.y <= zoneYMax) {
+        this.joystickLeft = { startX: pointer.x, startY: pointer.y, startTime: this.time.now / 1000 };
+        return;
+      }
+    });
+
+    this.input.on('pointerup', (pointer) => {
+      if (!this.gameStarted) return;
+      if (this.gameOver || this.isLevelClear || this.isCardPicking) return;
+
+      if (this.pendingCrystalGesture && this.pendingCrystalGesture.pointerId === pointer.id) {
+        const gesture = this.pendingCrystalGesture;
+        this.pendingCrystalGesture = null;
+        const dragDist = Math.hypot(pointer.x - gesture.startX, pointer.y - gesture.startY);
+        if (dragDist < MIN_FLICK_DISTANCE) {
+          const crystal = this.getCrystalDefenseZone();
+          if (this.lightningCooldown <= 0) {
+            const hasEnemy = this.enemies.some(
+              e => !e.isDead && Phaser.Math.Distance.Between(e.x, e.y, crystal.x, crystal.y) <= crystal.radius
+            );
+            if (hasEnemy) this.applyLightning(pointer.x, pointer.y);
+          }
+        }
+        this.aimGfx.clear();
+        return;
+      }
+
+      // Crystal tap vs drag gesture resolution.
+      if (this.joystickMain) {
+        this.joystickMain = null;
+        this.aimGfx.clear();
+        return;
+      }
+
+      // Left zone drag aim.
+      if (this.joystickLeft) {
+        const js = this.joystickLeft;
+        this.joystickLeft = null;
+        this.aimGfx.clear();
+        const dragDist = Math.hypot(pointer.x - js.startX, pointer.y - js.startY);
+        if (dragDist >= MIN_FLICK_DISTANCE && js.targetX != null) {
+          const targetX = js.targetX;
+          const targetY = js.targetY;
+          const launchX = (window.DEBUG_JOYSTICK?.leftTowerX ?? JOYSTICK_LEFT_LAUNCH_X) * WIDTH;
+          const launchY = (window.DEBUG_JOYSTICK?.leftTowerY ?? JOYSTICK_LEFT_LAUNCH_Y) * HEIGHT;
+          const dx = targetX - launchX;
+          const dy = targetY - launchY;
+          const dist = Math.hypot(dx, dy);
+          const dirX = dx / dist;
+          const dirY = dy / dist;
+          const vz0 = SUB_WEAPON_CONFIG.arcMinUpwardSpeed;
+          const flightTime = (2 * vz0) / SUB_WEAPON_CONFIG.arcGravity;
+          const gestureSpeed = Phaser.Math.Clamp(
+            dist / (flightTime * HORIZONTAL_SPEED_MULTIPLIER),
+            MIN_HORIZONTAL_SPEED, MAX_HORIZONTAL_SPEED
+          );
+          const isPerfect = gestureSpeed >= PERFECT_RELEASE_SPEED_MIN && gestureSpeed <= PERFECT_RELEASE_SPEED_MAX;
+          this.spawnWeaponProjectiles(launchX, launchY, dirX, dirY, gestureSpeed, isPerfect, 'sub');
+          // Sub weapon: apply forced landing arc before hit processing.
+          const lastProj = this.projectiles[this.projectiles.length - 1];
+          if (lastProj && lastProj.weaponType === 'sub') {
+            lastProj.forcedLandX = targetX;
+            lastProj.forcedLandY = targetY;
+            lastProj.forcedStartX = launchX;
+            lastProj.forcedStartY = launchY;
+            const dist = Math.hypot(targetX - launchX, targetY - launchY);
+            lastProj.forcedFlightTime = Phaser.Math.Clamp(dist / 400, 0.4, 1.8);
+            lastProj.forcedArcHeight = Math.min(dist * 0.3, 150);
+            lastProj.flightTimer = 0;
+          }
+        }
+        return;
+      }
+    });
+
+      // Pointer move updates active gestures.
+    this.input.on('pointermove', (pointer) => {
+      if (!this.gameStarted) return;
+      if (this.pendingCrystalGesture && this.pendingCrystalGesture.pointerId === pointer.id) {
+        this.pendingCrystalGesture.currentX = pointer.x;
+        this.pendingCrystalGesture.currentY = pointer.y;
+        const dragDist = Math.hypot(
+          pointer.x - this.pendingCrystalGesture.startX,
+          pointer.y - this.pendingCrystalGesture.startY,
+        );
+        if (dragDist >= MIN_FLICK_DISTANCE) {
+          this.joystickMain = {
+            startX: this.pendingCrystalGesture.startX,
+            startY: this.pendingCrystalGesture.startY,
+            currentPointerX: pointer.x,
+            currentPointerY: pointer.y,
+            fireTimer: NORMAL_FIRE_RATE,
+          };
+          this.pendingCrystalGesture = null;
+          this.drawMainAim(this.joystickMain, pointer);
+          return;
+        }
+      }
+      if (this.joystickMain) {
+        this.joystickMain.currentPointerX = pointer.x;
+        this.joystickMain.currentPointerY = pointer.y;
+        this.drawMainAim(this.joystickMain, pointer);
+      } else if (this.joystickLeft) {
+        this.drawLeftAim(this.joystickLeft, pointer);
+      } else {
+        if (this.aimGfx) this.aimGfx.clear();
+      }
     });
   }
 
     showCardPicker() {
       this.isCardPicking = true;
+      this.cardPickerReady = false;
+      this.time.delayedCall(500, () => { this.cardPickerReady = true; });
 
-      // 從卡池過濾出可選卡片，隨機取 3 張
+      // Build three upgrade choices via weighted sampling without replacement.
       const available = CARD_POOL.filter(card =>
         !card.canPick || card.canPick(this)
       );
-      const shuffled = available.sort(() => Math.random() - 0.5);
-      const choices = shuffled.slice(0, 3);
+      const pool = available.map(card => ({ card, weight: card.weight ?? CARD_RARITY_WEIGHTS.common }));
+      const choices = [];
+      while (choices.length < 3 && pool.length > 0) {
+        const total = pool.reduce((s, e) => s + e.weight, 0);
+        let r = Math.random() * total;
+        for (let i = 0; i < pool.length; i++) {
+          r -= pool[i].weight;
+          if (r <= 0) { choices.push(pool[i].card); pool.splice(i, 1); break; }
+        }
+      }
 
       const els = [];
 
-      // 半透明遮罩
-      const overlay = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x000000, 0.72).setDepth(95).setInteractive();
+      // Card picker overlay.
+      const overlay = this.add.rectangle(WIDTH / 2, HEIGHT / 2, WIDTH, HEIGHT, 0x000000, 0.72).setDepth(200).setInteractive();
       els.push(overlay);
 
-      // 標題
-      const title = this.add.text(WIDTH / 2, 120, '選擇升級', {
-        fontFamily: 'Arial', fontSize: '40px', color: '#ffe066',
-        stroke: '#000000', strokeThickness: 4,
-      }).setOrigin(0.5).setDepth(96);
+      // Card picker area = top third of the screen.
+      const areaTop = 0;
+      const areaBottom = HEIGHT / 3;
+      const areaMidY = (areaTop + areaBottom) / 2;
+
+      // Title.
+      const title = this.add.text(WIDTH / 2, areaTop + 28, 'Choose Upgrade', {
+        fontFamily: 'Arial', fontSize: '26px', color: '#ffe066',
+        stroke: '#000000', strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(201);
       els.push(title);
 
-      // 卡片按鈕（3 張垂直排列）
-      const cardW = 300;
-      const cardH = 110;
-      const startY = 230;
-      const gap = 130;
-
+      // Card layout.
+      const cardW = 100;
+      const cardH = 160;
+      const totalCards = choices.length;
+      const totalWidth = totalCards * cardW + (totalCards - 1) * 20;
+      const startX = WIDTH / 2 - totalWidth / 2 + cardW / 2;
+      const cardY = areaMidY + 18; // Center cards vertically.
       choices.forEach((card, i) => {
-        const cy = startY + i * gap;
+        const cx = startX + i * (cardW + 20);
+        const rarity = card.rarity || 'common';
+        const colors = CARD_RARITY_COLORS[rarity] || CARD_RARITY_COLORS.common;
 
-        const bg = this.add.rectangle(WIDTH / 2, cy, cardW, cardH, 0x1a2a4a, 1)
-          .setDepth(96).setStrokeStyle(2, 0x5ad2f0).setInteractive({ useHandCursor: true });
+        const bg = this.add.rectangle(cx, cardY, cardW, cardH, colors.bg, 1)
+          .setDepth(201).setStrokeStyle(2, colors.stroke).setInteractive({ useHandCursor: true });
 
-        const labelText = this.add.text(WIDTH / 2, cy - 18, card.label, {
-          fontFamily: 'Arial', fontSize: '26px', color: '#f0f0f0',
-        }).setOrigin(0.5).setDepth(97);
+        const labelText = this.add.text(cx, cardY - cardH / 2 + 26, card.label, {
+          fontFamily: 'Arial', fontStyle: 'bold', fontSize: '15px', color: colors.title,
+          wordWrap: { width: cardW - 12 }, align: 'center',
+        }).setOrigin(0.5).setDepth(202);
 
-        const descText = this.add.text(WIDTH / 2, cy + 22, card.desc, {
-          fontFamily: 'Arial', fontSize: '20px', color: '#aac8e0',
-        }).setOrigin(0.5).setDepth(97);
+        const descText = this.add.text(cx, cardY - cardH / 2 + 58, card.desc, {
+          fontFamily: 'Arial', fontSize: '12px', color: '#aac8e0',
+          wordWrap: { width: cardW - 12 }, align: 'center',
+        }).setOrigin(0.5, 0).setDepth(202);
 
-        bg.on('pointerover', () => bg.setFillStyle(0x2e4a7a));
-        bg.on('pointerout', () => bg.setFillStyle(0x1a2a4a));
+        const rarityText = this.add.text(cx, cardY + cardH / 2 - 14, rarity.toUpperCase(), {
+          fontFamily: 'Arial', fontStyle: 'bold', fontSize: '10px', color: colors.title,
+          alpha: 0.75,
+        }).setOrigin(0.5).setDepth(202);
+
+        bg.on('pointerover', () => bg.setFillStyle(colors.bgHover));
+        bg.on('pointerout', () => bg.setFillStyle(colors.bg));
         bg.on('pointerup', () => {
+          if (!this.cardPickerReady) return;
           card.apply(this);
-          this.updateWeaponSwitchBtn();
           this.dismissCardPicker();
         });
 
-        els.push(bg, labelText, descText);
+        els.push(bg, labelText, descText, rarityText);
       });
 
       this.cardUiElements = els;
@@ -791,16 +1065,15 @@ function speedMultiplierForLevel(level) {
       this.isCardPicking = false;
     }
 
-    // Debug 用：直接套用指定卡片
+    // Debug card helper.
     applyCardById(cardId) {
       const card = CARD_POOL.find(c => c.id === cardId);
       if (!card) return;
       if (card.canPick && !card.canPick(this)) return;
       card.apply(this);
-      this.updateWeaponSwitchBtn();
     }
 
-    // Debug 用：關卡前進
+    // Debug level advance helper.
     debugLevelAdvance() {
       this.isLevelClear = false;
       this.isCardPicking = false;
@@ -820,7 +1093,7 @@ function speedMultiplierForLevel(level) {
       this.spawnTimer = 0;
     }
 
-    // Debug 用：關卡後退
+    // Debug level retreat helper.
     debugLevelRetreat() {
       if (this.currentLevel <= 1) return;
       this.isLevelClear = false;
@@ -855,11 +1128,17 @@ function speedMultiplierForLevel(level) {
       this.enemiesSpawnedThisLevel = 0;
       this.isLevelClear = false;
       this.spawnTimer = 0;
-      // 清掉畫面上剩餘怪物
+      // Heal by 1 up to max HP.
+      const maxHp = this.maxHp || PLAYER_HP_START;
+      if (this.hp < maxHp) this.hp = Math.min(this.hp + 1, maxHp);
+      // Clear enemies.
       for (const enemy of this.enemies) {
         if (enemy.slimeSprite) { enemy.slimeSprite.destroy(); enemy.slimeSprite = null; }
       }
       this.enemies = [];
+      // Clear health pots.
+      for (const pot of this.healthPots) { pot.label.destroy(); }
+      this.healthPots = [];
       this.levelClearOverlay.setVisible(false);
       this.levelClearText.setVisible(false);
       this.levelClearBtn.setVisible(false);
@@ -873,7 +1152,6 @@ function speedMultiplierForLevel(level) {
         if (hitCount >= SLASH_MAX_TARGETS) break;
         const enemy = this.enemies[i];
         if (enemy.isDead) continue;
-        if (enemy.y < DANGER_ZONE_TOP_Y) continue;
         const dist = distancePointToSegment(enemy.x, enemy.y, x1, y1, x2, y2);
         if (dist <= SLASH_HIT_RADIUS + enemy.displayedRadius()) {
           enemy.hp -= SLASH_DAMAGE;
@@ -887,113 +1165,293 @@ function speedMultiplierForLevel(level) {
         }
       }
 
-      // 斬殺特效
+      // Slash effect.
       this.slashEffects.push({ x1, y1, x2, y2, timer: 0, duration: 0.18, hit: hitCount > 0 });
       this.slashCooldown = hitCount > 0 ? SLASH_COOLDOWN : SLASH_MISS_STUN;
     }
 
-    spawnWeaponProjectiles(startX, startY, directionX, directionY, gestureSpeed, isPerfectRelease) {
-      const wtype = this.currentWeaponType;
-      const weapon = WEAPON_TYPES[wtype] || WEAPON_TYPES.normal;
+    spawnWeaponProjectiles(startX, startY, directionX, directionY, gestureSpeed, isPerfectRelease, slot = 'main') {
+      const cfg = slot === 'sub' ? SUB_WEAPON_CONFIG : MAIN_WEAPON_CONFIG;
       const baseSpeed = Phaser.Math.Clamp(
-        gestureSpeed * SPEED_MULTIPLIER * weapon.speedMultiplier,
+        gestureSpeed * SPEED_MULTIPLIER * cfg.speedMultiplier,
         MIN_HORIZONTAL_SPEED,
         MAX_HORIZONTAL_SPEED,
       );
 
-      // 速度傷害乘數：gestureSpeed 對應 MIN/MAX_HORIZONTAL_SPEED 範圍線性插值
-      const speedRatio = Phaser.Math.Clamp(
-        (gestureSpeed * weapon.speedMultiplier - MIN_HORIZONTAL_SPEED) / (MAX_HORIZONTAL_SPEED - MIN_HORIZONTAL_SPEED),
-        0, 1,
-      );
-      const speedDamageMultiplier = Phaser.Math.Linear(SPEED_DAMAGE_MIN_MULTIPLIER, SPEED_DAMAGE_MAX_MULTIPLIER, speedRatio);
-
-      const ammo = this.weaponAmmo[wtype];
-      if (!ammo || ammo.currentAmmo < ammo.ammoCostPerShot) {
-        this.lastFiredWeaponType = wtype;
-        this.lastSpawnedProjectileCount = 0;
-        return;
+      // Sub weapon uses cooldown.
+      if (slot === 'sub') {
+        const cd = this.skillCooldowns.sub;
+        if (!cd || cd.current > 0) {
+          this.lastFiredWeaponType = slot;
+          this.lastSpawnedProjectileCount = 0;
+          return;
+        }
+        const effectiveCooldown = SUB_WEAPON_CONFIG.cooldownSeconds / (1 + this.subCooldownBonus);
+        cd.current = cd.max = effectiveCooldown;
       }
-      ammo.currentAmmo -= ammo.ammoCostPerShot;
-      ammo.rechargeTimer = 0;
-      let spawnedCount = 0;
+      this.playSfx(slot === 'sub' ? 'shoot_bomb' : 'shoot');
 
-      if (wtype === 'twin') {
-        const left = rotateVector(directionX, directionY, -weapon.spreadDeg);
-        const right = rotateVector(directionX, directionY, weapon.spreadDeg);
-        const leftProjectile = new Projectile(this, startX, startY, left.x, left.y, baseSpeed, wtype);
-        const rightProjectile = new Projectile(this, startX, startY, right.x, right.y, baseSpeed, wtype);
-        leftProjectile.perfect = isPerfectRelease;
-        rightProjectile.perfect = isPerfectRelease;
-        leftProjectile.speedDamageMultiplier = speedDamageMultiplier;
-        rightProjectile.speedDamageMultiplier = speedDamageMultiplier;
-        this.projectiles.push(leftProjectile);
-        this.projectiles.push(rightProjectile);
-        spawnedCount = 2;
-        this.lastFiredWeaponType = wtype;
-        this.lastSpawnedProjectileCount = spawnedCount;
+      if (slot === 'sub') {
+        const projectile = new Projectile(this, startX, startY, directionX, directionY, baseSpeed, slot);
+        projectile.perfect = isPerfectRelease;
+        this.projectiles.push(projectile);
+        this.lastFiredWeaponType = slot;
+        this.lastSpawnedProjectileCount = 1;
         return;
       }
 
-      const projectile = new Projectile(this, startX, startY, directionX, directionY, baseSpeed, wtype);
-      projectile.perfect = isPerfectRelease;
-      projectile.speedDamageMultiplier = speedDamageMultiplier;
-      this.projectiles.push(projectile);
-      spawnedCount = 1;
-      this.lastFiredWeaponType = wtype;
-      this.lastSpawnedProjectileCount = spawnedCount;
+      // Main slot: determine power shot once per firing event.
+      this.mainShotCounter += 1;
+      let isPowerShot = false;
+      let damageMultiplier = 1;
+      if (this.mainPowerShotLevel > 0 && this.mainShotCounter % MAIN_POWER_SHOT_CONFIG.triggerEveryShots === 0) {
+        isPowerShot = true;
+        damageMultiplier = Math.min(
+          MAIN_POWER_SHOT_CONFIG.maxMultiplier,
+          MAIN_POWER_SHOT_CONFIG.baseMultiplier + (this.mainPowerShotLevel - 1) * MAIN_POWER_SHOT_CONFIG.multiplierPerLevel
+        );
+      }
+
+      // Build direction list: original + rotated extra if multishot active.
+      const directions = [{ dx: directionX, dy: directionY }];
+      if (this.mainMultishotLevel > 0) {
+        const rad = MAIN_MULTISHOT_CONFIG.angleOffsetDeg * (Math.PI / 180);
+        const cos = Math.cos(rad);
+        const sin = Math.sin(rad);
+        directions.push({
+          dx: directionX * cos - directionY * sin,
+          dy: directionX * sin + directionY * cos,
+        });
+      }
+
+      for (const { dx, dy } of directions) {
+        const projectile = new Projectile(this, startX, startY, dx, dy, baseSpeed, slot);
+        projectile.isPowerShot = isPowerShot;
+        projectile.damageMultiplier = damageMultiplier;
+        this.projectiles.push(projectile);
+      }
+      this.lastFiredWeaponType = slot;
+      this.lastSpawnedProjectileCount = directions.length;
     }
 
-    updateWeaponAmmo(dt) {
-      for (const ammo of Object.values(this.weaponAmmo)) {
-        if (ammo.currentAmmo >= ammo.maxAmmo) {
-          ammo.rechargeTimer = 0;
-          continue;
-        }
-        ammo.rechargeTimer += dt;
-        while (ammo.currentAmmo < ammo.maxAmmo && ammo.rechargeTimer >= ammo.ammoRechargeSeconds) {
-          ammo.rechargeTimer -= ammo.ammoRechargeSeconds;
-          ammo.currentAmmo += 1;
-        }
+    updateSkillCooldowns(dt) {
+      for (const cd of Object.values(this.skillCooldowns)) {
+        if (cd.current > 0) cd.current = Math.max(0, cd.current - dt);
       }
     }
 
-    drawAmmoHud() {
-      const g = this.hudGfx;
+    drawMainAim(joystick, pointer) {
+      const g = this.aimGfx;
       g.clear();
-
-      const colors = {
-        normal: { fill: 0x5bc0ff, outline: 0xd9f2ff },
-        twin: { fill: 0x9ef06d, outline: 0xe2ffd3 },
-        bomb: { fill: 0xffb14d, outline: 0xffe1b5 },
-      };
-      const weaponType = this.currentWeaponType;
-      const weapon = WEAPON_TYPES[weaponType];
-      const ammo = this.weaponAmmo[weaponType];
-      if (!weapon || !ammo) return;
-
-      const x = HUD_AMMO_X;
-      const baseY = HUD_AMMO_Y;
-      g.lineStyle(1, HUD_AMMO_LABEL_COLOR, 0.8);
-
-      for (let segment = 0; segment < ammo.maxAmmo; segment += 1) {
-        const y = baseY + (ammo.maxAmmo - 1 - segment) * (HUD_AMMO_SEGMENT_HEIGHT + HUD_AMMO_SEGMENT_GAP);
-        const filled = segment < ammo.currentAmmo;
-        const fillColor = filled ? colors[weaponType].fill : 0x2a2f36;
-        const alpha = filled ? 1 : 0.25;
-        g.fillStyle(fillColor, alpha);
-        g.fillRoundedRect(x, y, HUD_AMMO_BAR_WIDTH, HUD_AMMO_SEGMENT_HEIGHT, 3);
-        g.strokeRoundedRect(x, y, HUD_AMMO_BAR_WIDTH, HUD_AMMO_SEGMENT_HEIGHT, 3);
+      const launchX = joystick.startX;
+      const launchY = joystick.startY;
+      const dx = pointer.x - launchX;
+      const dy = pointer.y - launchY;
+      const totalDist = Math.hypot(dx, dy);
+      if (totalDist < 4) return;
+      const ndx = dx / totalDist;
+      const ndy = dy / totalDist;
+      const drawDist = totalDist + JOYSTICK_MAIN_AIM_EXTEND;
+      let t = 0;
+      while (t <= drawDist) {
+        const px = launchX + ndx * t;
+        const py = launchY + ndy * t;
+        if (px < -10 || px > WIDTH + 10 || py < -10 || py > HEIGHT + 10) break;
+        g.fillStyle(0xffffff, Math.max(0.12, 0.8 - t / (drawDist * 1.2)));
+        g.fillCircle(px, py, 3);
+        t += 20;
       }
     }
+
+    drawLeftAim(joystick, pointer) {
+      const dx = pointer.x - joystick.startX;
+      const dy = pointer.y - joystick.startY;
+      const distance = Math.hypot(dx, dy);
+      if (distance < 4) { this.aimGfx.clear(); return; }
+      const dirX = dx / distance;
+      const dirY = dy / distance;
+      const scale = window.DEBUG_JOYSTICK?.aimRangeScale ?? JOYSTICK_AIM_RANGE_SCALE;
+      const range = distance * scale;
+      const launchX = (window.DEBUG_JOYSTICK?.leftTowerX ?? JOYSTICK_LEFT_LAUNCH_X) * WIDTH;
+      const launchY = (window.DEBUG_JOYSTICK?.leftTowerY ?? JOYSTICK_LEFT_LAUNCH_Y) * HEIGHT;
+      const targetX = launchX + dirX * range;
+      const targetY = launchY + dirY * range;
+      joystick.targetX = targetX;
+      joystick.targetY = targetY;
+      this.drawArcToTarget(launchX, launchY, targetX, targetY, 'sub');
+    }
+
+      // Draw the arc from start to target.
+    drawArcToTarget(startX, startY, targetX, targetY, slot) {
+      const g = this.aimGfx;
+      g.clear();
+      const weapon = slot === 'sub' ? SUB_WEAPON_CONFIG : MAIN_WEAPON_CONFIG;
+      if (!weapon.hasArc) return;
+      const dx = targetX - startX;
+      const dy = targetY - startY;
+      const screenDist = Math.hypot(dx, dy);
+      if (screenDist < 1) return;
+      const ndx = dx / screenDist;
+      const ndy = dy / screenDist;
+      // Arc points use a sine curve.
+      const steps = 30;
+      const arcHeight = Math.min(screenDist * 0.35, 120); // Clamp arc height.
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const px = startX + dx * t;
+        const py = startY + dy * t - Math.sin(t * Math.PI) * arcHeight;
+        g.fillStyle(0xffb14d, Math.max(0.08, 0.8 - t * 0.55));
+        g.fillCircle(px, py, 3);
+      }
+      // Target marker.
+      const explR = (weapon.landingExplosionRadius || 40) * (1 + this.subRangeBonus);
+      g.lineStyle(2, 0xffdc78, 0.9);
+      g.strokeCircle(targetX, targetY, Math.max(18, explR));
+      g.fillStyle(0xffdc78, 0.15);
+      g.fillCircle(targetX, targetY, Math.max(18, explR));
+    }
+
+    applyLightning(tapX, tapY) {
+      const jsCfg = window.DEBUG_JOYSTICK || {};
+      const crystalX     = (jsCfg.crystalX ?? JOYSTICK_CRYSTAL_X) * WIDTH;
+      const crystalY     = (jsCfg.crystalY ?? JOYSTICK_CRYSTAL_Y) * HEIGHT;
+      const crystalRadius = JOYSTICK_CRYSTAL_RADIUS * WIDTH;
+
+      // Find the nearest enemy inside the crystal zone.
+      let nearestIdx = -1;
+      let nearestDist = Infinity;
+      for (let i = 0; i < this.enemies.length; i++) {
+        const e = this.enemies[i];
+        if (e.isDead) continue;
+        const d = Phaser.Math.Distance.Between(e.x, e.y, crystalX, crystalY);
+        if (d <= crystalRadius && d < nearestDist) { nearestIdx = i; nearestDist = d; }
+      }
+      if (nearestIdx === -1) return;
+
+      const enemy = this.enemies[nearestIdx];
+      const ex = enemy.x, ey = enemy.y;
+      this.applyDamageToEnemy(nearestIdx, SLASH_DAMAGE, false);
+      this.lightningCooldown = 0.3;
+
+      // Lightning effect.
+      const g = this.lightningGfx;
+      g.clear();
+      g.lineStyle(2, 0xaaddff, 0.95);
+      const SEG = 6;
+      let px = crystalX, py = crystalY;
+      for (let i = 1; i <= SEG; i++) {
+        const t = i / SEG;
+        const nx = crystalX + (ex - crystalX) * t + (i < SEG ? (Math.random() - 0.5) * 22 : 0);
+        const ny = crystalY + (ey - crystalY) * t + (i < SEG ? (Math.random() - 0.5) * 22 : 0);
+        g.lineBetween(px, py, nx, ny);
+        px = nx; py = ny;
+      }
+      this.time.delayedCall(150, () => { if (this.lightningGfx) this.lightningGfx.clear(); });
+    }
+
+    onSkillBtnClick(wtype) {
+      // skill buttons no longer toggle aim mode; kept for UI CD display
+    }
+
+    drawSkillButtons() {
+      for (const [wtype, objs] of Object.entries(this.skillBtnObjects)) {
+        const unlocked = this.unlockedWeapons[wtype];
+        const cd = this.skillCooldowns[wtype];
+        const isActive = this.activeSkillWeapon === wtype;
+        const onCd = unlocked && cd && cd.current > 0;
+        const colors = HUD_SKILL_BTN_COLORS[wtype] || { ready: 0xffffff, stroke: 0x888888 };
+        const bw = HUD_SKILL_BTN_W;
+
+        if (!unlocked) {
+          objs.bg.setFillStyle(0x111111, 0.7).setStrokeStyle(1, 0x333333);
+          objs.nameText.setColor('#555555');
+          objs.cdText.setColor('#444444').setText('LOCK');
+          objs.cdBar.setVisible(false);
+          objs.cdBarBg.setVisible(false);
+        } else if (isActive) {
+          objs.bg.setFillStyle(0x2a3a2a, 1).setStrokeStyle(2, 0xffffff);
+          objs.nameText.setColor('#ffffff');
+          objs.cdText.setColor('#aaffaa').setText('AIM!');
+          objs.cdBar.setVisible(false);
+          objs.cdBarBg.setVisible(false);
+        } else if (onCd) {
+          const ratio = cd.current / cd.max;
+          objs.bg.setFillStyle(0x111111, 0.8).setStrokeStyle(1, 0x333333);
+          objs.nameText.setColor('#666666');
+          objs.cdText.setColor('#888888').setText(`${cd.current.toFixed(1)}s`);
+          objs.cdBar.setVisible(true).setDisplaySize(Math.max(0, (bw - 8) * (1 - ratio)), 4).setFillStyle(colors.stroke, 1);
+          objs.cdBarBg.setVisible(true);
+        } else {
+          objs.bg.setFillStyle(0x1a2a3a, 1).setStrokeStyle(2, colors.stroke);
+          objs.nameText.setColor('#' + colors.ready.toString(16).padStart(6, '0'));
+          objs.cdText.setColor('#aaddff').setText('READY');
+          objs.cdBar.setVisible(false);
+          objs.cdBarBg.setVisible(false);
+        }
+      }
+    }
+
+    drawAimPrediction(startX, startY, dx, dy, slot) {
+      const g = this.aimGfx;
+      g.clear();
+      const weapon = slot === 'sub' ? SUB_WEAPON_CONFIG : MAIN_WEAPON_CONFIG;
+      const len = Math.hypot(dx, dy);
+      if (len < 1) return;
+      const ndx = dx / len;
+      const ndy = dy / len;
+      const previewSpeed = 1200;
+      const baseSpeed = Phaser.Math.Clamp(previewSpeed * weapon.speedMultiplier, MIN_HORIZONTAL_SPEED, MAX_HORIZONTAL_SPEED);
+
+      if (weapon.hasArc) {
+        let gx = startX, gy = startY, gz = 0;
+        const vx = ndx * baseSpeed * HORIZONTAL_SPEED_MULTIPLIER;
+        const vy = ndy * baseSpeed * HORIZONTAL_SPEED_MULTIPLIER;
+        let vz = Math.max(weapon.arcMinUpwardSpeed, previewSpeed * weapon.arcInitialVerticalMultiplier);
+        const SIM_DT = 1 / 60;
+        for (let i = 0; i < 240; i++) {
+          gx += vx * SIM_DT; gy += vy * SIM_DT;
+          gz += vz * SIM_DT; vz -= weapon.arcGravity * SIM_DT;
+          if (gz <= 0) {
+            const explR = weapon.landingExplosionRadius * (1 + this.subRangeBonus);
+            g.lineStyle(2, 0xffdc78, 0.9);
+            g.strokeCircle(gx, gy, Math.max(18, explR));
+            g.fillStyle(0xffdc78, 0.15);
+            g.fillCircle(gx, gy, Math.max(18, explR));
+            break;
+          }
+          if (i % 3 === 0) {
+            const alpha = Math.max(0.1, 0.8 - i * 0.003);
+            g.fillStyle(0xffb14d, alpha);
+            g.fillCircle(gx, gy - gz, 3);
+          }
+        }
+      } else {
+        const spreadDeg = weapon.spreadDeg || 0;
+        const dirs = spreadDeg > 0
+          ? [rotateVector(ndx, ndy, -spreadDeg), rotateVector(ndx, ndy, spreadDeg)]
+          : [{ x: ndx, y: ndy }];
+        for (const dir of dirs) {
+          for (let t = 10; t < 280; t += 14) {
+            const px = startX + dir.x * t;
+            const py = startY + dir.y * t;
+            if (px < -20 || px > WIDTH + 20 || py < -60 || py > HEIGHT + 20) break;
+            const alpha = Math.max(0.1, 0.75 - t / 400);
+            g.fillStyle(0x8fe8ff, alpha);
+            g.fillCircle(px, py, 3);
+          }
+        }
+      }
+    }
+
+    // drawAmmoHud removed; replaced by drawSkillButtons.
 
     addHitGauge(value) {
       const threshold = hitGaugeThreshold(this.hitGaugeCardCount);
 
-      // 連擊邏輯
+      // Hit gauge combo scaling.
       if (value > 0) {
         this.comboCount += 1;
-        // 每 5 連擊 +10%，上限 +100%
+        // Every 5 combo hits adds 10%, up to +100%.
         const comboTier = Math.min(Math.floor(this.comboCount / 5), 10);
         const multiplier = 1 + comboTier * 0.1;
         value = value * multiplier;
@@ -1008,7 +1466,7 @@ function speedMultiplierForLevel(level) {
       }
     }
 
-    // miss 懲罰，不觸發 comboCount（由呼叫端負責歸零）
+    // Misses reduce the combo count and the hit gauge.
     addHitGaugePenalty() {
       const threshold = hitGaugeThreshold(this.hitGaugeCardCount);
       this.hitGauge = Math.max(HIT_GAUGE_MIN, this.hitGauge - HIT_GAUGE_MISS_PENALTY);
@@ -1024,11 +1482,11 @@ function speedMultiplierForLevel(level) {
       const barW = HUD_HIT_GAUGE_WIDTH;
       const barH = HUD_HIT_GAUGE_MAX_HEIGHT;
 
-      // 背景
+      // Hit gauge background.
       g.fillStyle(0x2a2f36, 0.85);
       g.fillRoundedRect(x, topY, barW, barH, 4);
 
-      // 填充（從底部往上）
+      // Fill based on progress.
       if (progress > 0) {
         const fillH = Math.round(barH * progress);
         const fillColor = progress >= 0.8 ? 0xffe066 : 0x5ad2f0;
@@ -1036,11 +1494,11 @@ function speedMultiplierForLevel(level) {
         g.fillRoundedRect(x, topY + barH - fillH, barW, fillH, 4);
       }
 
-      // 外框
+      // Gauge border.
       g.lineStyle(1, 0xaaddff, 0.5);
       g.strokeRoundedRect(x, topY, barW, barH, 4);
 
-      // 數字顯示在條底下
+      // Hit gauge text.
       this.hitGaugeLabel.setText(`${Math.floor(this.hitGauge)}/${threshold}`);
       this.hitGaugeLabel.setPosition(x + barW / 2, topY + barH + 4);
     }
@@ -1054,7 +1512,7 @@ function speedMultiplierForLevel(level) {
       const segW = HUD_HP_BAR_SEGMENT_W;
       const segH = HUD_HP_BAR_SEGMENT_H;
       const gap = HUD_HP_BAR_SEGMENT_GAP;
-      // 顯示最多 10 格，避免超出畫面
+      // HP display uses up to 10 segments.
       const displayMax = Math.min(hp, 10);
       for (let i = 0; i < displayMax; i++) {
         const sx = x + i * (segW + gap);
@@ -1074,24 +1532,98 @@ function speedMultiplierForLevel(level) {
       }
     }
 
-    cycleWeapon() {
-      const order = ['normal', 'twin', 'bomb'];
-      const unlocked = order.filter(w => this.unlockedWeapons[w]);
-      if (unlocked.length <= 1) return;
-      const idx = unlocked.indexOf(this.currentWeaponType);
-      this.currentWeaponType = unlocked[(idx + 1) % unlocked.length];
-      this.updateWeaponSwitchBtn();
+    unlockAudioOnce() {
+      if (this.audioUnlocked) {
+        return;
+      }
+      try {
+        const soundManager = this.sound;
+        const context = soundManager && (soundManager.context || (soundManager.manager && soundManager.manager.context));
+        if (context && typeof context.resume === 'function' && context.state === 'suspended') {
+          try {
+            context.resume();
+          } catch (e) {}
+        }
+        if (soundManager && typeof soundManager.unlock === 'function') {
+          try { soundManager.unlock(); } catch (e) {}
+        }
+      } catch (e) {}
+      this.audioUnlocked = true;
     }
 
-    updateWeaponSwitchBtn() {
-      const labels = { normal: '主武器', twin: 'Twin', bomb: 'Bomb' };
-      const colors = { normal: '#5bc0ff', twin: '#9ef06d', bomb: '#ffb14d' };
-      const w = this.currentWeaponType;
-      this.weaponSwitchBtn.setText(labels[w] || w);
-      this.weaponSwitchBtn.setStyle({ color: colors[w] || '#ffffff' });
-      // 只有解鎖超過 1 種武器時才顯示按鈕
-      const unlockedCount = Object.values(this.unlockedWeapons).filter(Boolean).length;
-      this.weaponSwitchBtn.setVisible(unlockedCount > 1);
+    playSfx(key) {
+      if (!this.audioUnlocked) {
+        return;
+      }
+      try { if (this.sfx && this.sfx[key]) this.sfx[key].play(); } catch(e) {}
+    }
+
+    // cycleWeapon + updateWeaponSwitchBtn removed ??replaced by skill button system
+
+    getRightTowerPosition() {
+      return {
+        x: RIGHT_TOWER_X * WIDTH,
+        y: RIGHT_TOWER_Y * HEIGHT,
+      };
+    }
+
+    getCrystalDefenseZone() {
+      const jsCfg = window.DEBUG_JOYSTICK || {};
+      return {
+        x: (jsCfg.crystalX ?? JOYSTICK_CRYSTAL_X) * WIDTH,
+        y: (jsCfg.crystalY ?? JOYSTICK_CRYSTAL_Y) * HEIGHT,
+        radius: JOYSTICK_CRYSTAL_RADIUS * WIDTH,
+      };
+    }
+
+    updatePassiveWeapon(dt) {
+      if (!RIGHT_TOWER_ENABLED) {
+        return;
+      }
+
+      this.passiveWeaponTickTimer += dt;
+
+      const effectiveTick = RIGHT_TOWER_TICK_INTERVAL / (1 + this.passiveFireRateBonus);
+      while (this.passiveWeaponTickTimer >= effectiveTick) {
+        this.passiveWeaponTickTimer -= effectiveTick;
+
+        const towerPos = this.getRightTowerPosition();
+        const crystalZone = this.getCrystalDefenseZone();
+        const tickDamage = RIGHT_TOWER_DPS * (1 + this.passiveDamageBonus) * effectiveTick;
+        const passiveExtraTargets = (this.passiveMultitargetLevel || 0) * PASSIVE_MULTITARGET_CONFIG.targetsPerLevel;
+        const maxTargets = RIGHT_TOWER_MAX_TARGETS + passiveExtraTargets;
+        const targets = this.enemies
+          .filter((enemy) => !enemy.isDead
+            && Phaser.Math.Distance.Between(enemy.x, enemy.y, crystalZone.x, crystalZone.y) <= crystalZone.radius)
+          .sort((a, b) => {
+            if (a.inZone !== b.inZone) {
+              return a.inZone ? -1 : 1;
+            }
+            const distA = Phaser.Math.Distance.Between(a.x, a.y, crystalZone.x, crystalZone.y);
+            const distB = Phaser.Math.Distance.Between(b.x, b.y, crystalZone.x, crystalZone.y);
+            return distA - distB;
+          })
+          .slice(0, maxTargets);
+
+        for (const enemy of targets) {
+          this.passiveWeaponEffects.push({
+            fromX: towerPos.x,
+            fromY: towerPos.y,
+            toX: enemy.x,
+            toY: enemy.y,
+            timer: 0,
+            duration: 0.12,
+          });
+
+          enemy.hp -= tickDamage;
+          if (enemy.hp <= 0) {
+            enemy.isDead = true;
+            enemy.deathTimer = 0;
+            this.score += enemy.scoreValue || enemy.type.scoreValue || 1;
+            this.playSfx('enemy_death');
+          }
+        }
+      }
     }
 
     applyDamageToEnemy(enemyIndex, damage, isPerfect = false) {
@@ -1099,12 +1631,18 @@ function speedMultiplierForLevel(level) {
       if (!enemy) {
         return false;
       }
-      // 命中 +1
+      // Add one hit-gauge point.
       this.addHitGauge(HIT_GAUGE_HIT_VALUE);
+      this.playSfx('hit');
+      this.spawnDamagePopup(enemy.x, enemy.y, damage, isPerfect);
       enemy.hp -= damage;
       if (enemy.hp <= 0) {
         if (isPerfect) {
           this.spawnPerfectPopup(enemy.x, enemy.y);
+        }
+        this.playSfx('enemy_death');
+        if (Math.random() < HEALTH_POT_CHANCE) {
+          this.spawnHealthPot(enemy.x, enemy.y);
         }
         enemy.isDead = true;
         enemy.deathTimer = 0;
@@ -1118,8 +1656,46 @@ function speedMultiplierForLevel(level) {
       return false;
     }
 
+    applyMainKnockback(enemy) {
+      if (enemy.isDead) return;
+      const level = Math.min(
+        Math.max(0, this.mainKnockbackLevel),
+        MAIN_KNOCKBACK_CONFIG.maxLevel
+      );
+      if (level === 0) return;
+      let dist = MAIN_KNOCKBACK_CONFIG.knockbackByLevel[level];
+      if (enemy.inZone) dist *= 0.3;
+      if (enemy.type && enemy.type.label === 'tank') dist *= 0.5;
+      if (dist <= 0) return;
+      enemy.y = Math.max(FAR_BATTLEFIELD_Y, enemy.y - dist);
+    }
+
+    applySubGravityPull(cx, cy, radius) {
+      if (this.subPullLevel <= 0) return;
+      const level = Math.min(Math.max(0, this.subPullLevel), SUB_PULL_CONFIG.maxLevel);
+      const pullConfig = SUB_PULL_CONFIG.pullByLevel[level];
+      if (!pullConfig || pullConfig.distance <= 0) return;
+      const effectiveRadius = radius * (1 + this.subRangeBonus);
+      for (const enemy of this.enemies) {
+        if (enemy.isDead) continue;
+        const dx = cx - enemy.x;
+        const dy = cy - enemy.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > effectiveRadius + enemy.displayedRadius()) continue;
+        let pull = pullConfig.distance;
+        if (enemy.inZone) pull *= 0.5;
+        if (dist <= 0) continue;
+        const move = Math.min(pull, dist);
+        enemy.x += (dx / dist) * move;
+        enemy.y += (dy / dist) * move;
+        // Clamp within battlefield.
+        enemy.x = Math.max(0, Math.min(WIDTH, enemy.x));
+        enemy.y = Math.max(FAR_BATTLEFIELD_Y, Math.min(DEFENSE_LINE_Y, enemy.y));
+      }
+    }
+
     applyBombDamage(cx, cy, radius, damage, isPerfect = false) {
-      const effectiveRadius = radius * (this.bombRadiusMultiplier || 1);
+      const effectiveRadius = radius * (1 + this.subRangeBonus);
       let hitCount = 0;
       for (let i = this.enemies.length - 1; i >= 0; i -= 1) {
         const enemy = this.enemies[i];
@@ -1128,6 +1704,7 @@ function speedMultiplierForLevel(level) {
         if (Phaser.Math.Distance.Between(enemy.x, enemy.y, cx, cy) <= hitRadius) {
           this.addHitGauge(HIT_GAUGE_HIT_VALUE);
           hitCount += 1;
+          this.spawnDamagePopup(enemy.x, enemy.y, damage, isPerfect);
           enemy.hp -= damage;
           if (isPerfect) {
             this.spawnPerfectPopup(enemy.x, enemy.y);
@@ -1135,6 +1712,10 @@ function speedMultiplierForLevel(level) {
           if (enemy.hp <= 0) {
             enemy.isDead = true;
             enemy.deathTimer = 0;
+            this.playSfx('enemy_death');
+            if (Math.random() < HEALTH_POT_CHANCE) {
+              this.spawnHealthPot(enemy.x, enemy.y);
+            }
             this.score += enemy.type.scoreValue || 1;
           } else {
             enemy.applyHitStun();
@@ -1161,34 +1742,135 @@ function speedMultiplierForLevel(level) {
       });
     }
 
+    spawnDamagePopup(x, y, damage, isPerfect) {
+      const displayVal = Math.round(damage * 10) / 10;
+      const label = isPerfect ? `${displayVal}!` : `${displayVal}`;
+      // Popup color indicates perfect or normal damage.
+      let color = '#e0e0e0';
+      if (isPerfect)         color = '#ffaa44';
+      else if (damage >= 2)  color = '#ffe066';
+      else if (damage >= 1)  color = '#ffffff';
+      const size = isPerfect ? '22px' : damage >= 2 ? '20px' : '16px';
+      const text = this.add.text(x + Phaser.Math.Between(-10, 10), y - 20, label, {
+        fontFamily: 'Arial Black, Arial',
+        fontSize: size,
+        color,
+        stroke: '#000000',
+        strokeThickness: 3,
+      }).setOrigin(0.5).setDepth(190);
+      this.damagePopups.push({ x: text.x, y: text.y, timer: 0, duration: 0.55, text });
+    }
+
+    spawnHealthPot(x, y) {
+      const label = this.add.text(x, y, '❤️', {
+        fontSize: '28px',
+      }).setOrigin(0.5).setDepth(30);
+      this.healthPots.push({ x, y, timer: 0, duration: HEALTH_POT_DURATION, label });
+    }
+
     drawTerrain() {
       const g = this.gfx;
       g.clear();
 
-      // 禁區背景
-      g.fillStyle(DANGER_ZONE_FILL_COLOR, DANGER_ZONE_FILL_ALPHA);
-      g.fillRect(0, DANGER_ZONE_TOP_Y, WIDTH, DANGER_ZONE_HEIGHT);
+      // Debug overlay.
+      if (typeof DEBUG_PANEL_VISIBLE !== 'undefined' && DEBUG_PANEL_VISIBLE) {
+        const jsCfg = window.DEBUG_JOYSTICK || {};
+        const leftXMax  = (jsCfg.leftXMax  ?? JOYSTICK_LEFT_X_MAX)  * WIDTH;
+        const mainXMin = (jsCfg.mainXMin ?? jsCfg.rightXMin ?? JOYSTICK_MAIN_X_MIN) * WIDTH;
+        const zoneYMin  = (jsCfg.zoneYMin  ?? JOYSTICK_ZONE_Y_MIN)  * HEIGHT;
+        const zoneYMax  = (jsCfg.zoneYMax  ?? JOYSTICK_ZONE_Y_MAX)  * HEIGHT;
+        const cxRaw     = (jsCfg.crystalX  ?? JOYSTICK_CRYSTAL_X)   * WIDTH;
+        const cyRaw     = (jsCfg.crystalY  ?? JOYSTICK_CRYSTAL_Y)   * HEIGHT;
+        const cRadius   = JOYSTICK_CRYSTAL_RADIUS * WIDTH;
+        const zoneH     = zoneYMax - zoneYMin;
 
-      // 禁區上邊界線
-      g.lineStyle(DANGER_ZONE_LINE_WIDTH, DANGER_ZONE_LINE_COLOR, DANGER_ZONE_LINE_ALPHA);
-      g.lineBetween(0, DANGER_ZONE_TOP_Y, WIDTH, DANGER_ZONE_TOP_Y);
+        // Left zone overlay.
+        g.fillStyle(0x4488ff, 0.15);
+        g.fillRect(0, zoneYMin, leftXMax, zoneH);
+
+        // Main zone overlay.
+        g.fillStyle(0x44ff88, 0.15);
+        g.fillRect(mainXMin, zoneYMin, WIDTH - mainXMin, zoneH);
+
+        // Crystal debug ring.
+        g.lineStyle(2, 0xff4444, 0.5);
+        g.strokeCircle(cxRaw, cyRaw, cRadius);
+        g.fillStyle(0xff4444, 0.08);
+        g.fillCircle(cxRaw, cyRaw, cRadius);
+      }
+    }
+
+    drawPassiveWeapon() {
+      if (!RIGHT_TOWER_ENABLED) {
+        return;
+      }
+
+      const g = this.gfx;
+      const towerPos = this.getRightTowerPosition();
+
+      g.fillStyle(0xff7b2f, 0.9);
+      g.fillCircle(towerPos.x, towerPos.y, 10);
+      g.lineStyle(2, 0xffd36b, 0.95);
+      g.strokeCircle(towerPos.x, towerPos.y, 10);
+
+      for (const effect of this.passiveWeaponEffects) {
+        const progress = effect.timer / effect.duration;
+        const alpha = 1 - progress;
+        const midX = Phaser.Math.Linear(effect.fromX, effect.toX, 0.55) + Phaser.Math.FloatBetween(-5, 5);
+        const midY = Phaser.Math.Linear(effect.fromY, effect.toY, 0.55) + Phaser.Math.FloatBetween(-5, 5);
+
+        g.lineStyle(7 - progress * 3, 0xff7b2f, alpha * 0.75);
+        g.lineBetween(effect.fromX, effect.fromY, midX, midY);
+        g.lineStyle(3.5 - progress, 0xffd36b, alpha * 0.95);
+        g.lineBetween(midX, midY, effect.toX, effect.toY);
+      }
     }
 
   update(time, delta) {
     const dt = delta / 1000;
 
+    if (!this.gameStarted) {
+      this.drawTerrain();
+      this.drawSkillButtons();
+      this.drawHitGauge();
+      this.drawHpBar();
+      this.drawCombo();
+      this.hudText.setText(`Score: ${this.score}`);
+      this.levelText.setText(`Level: ${this.currentLevel}`);
+      return;
+    }
+
     if (this.isCardPicking) return;
 
       if (!this.gameOver) {
         this.playTime += dt;
-        // currentLevel 現在由 startNextLevel 手動推進，不再用時間計算
+        // Update level speed scaling from the current level.
         this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
-        this.updateWeaponAmmo(dt);
+        this.updateSkillCooldowns(dt);
         if (this.slashCooldown > 0) this.slashCooldown -= dt;
+        if (this.lightningCooldown > 0) this.lightningCooldown -= dt;
+
+        // Main weapon auto-fire while dragging.
+        if (this.joystickMain) {
+          const js = this.joystickMain;
+          js.fireTimer += dt;
+          const effectiveFireRate = NORMAL_FIRE_RATE / (1 + this.mainFireRateBonus);
+          if (js.fireTimer >= effectiveFireRate) {
+            js.fireTimer -= effectiveFireRate;
+            const launchX = js.startX;
+            const launchY = js.startY;
+            const dx = js.currentPointerX - launchX;
+            const dy = js.currentPointerY - launchY;
+            const d = Math.hypot(dx, dy);
+            if (d > 0) {
+              this.spawnWeaponProjectiles(launchX, launchY, dx / d, dy / d, NORMAL_PROJECTILE_SPEED, false, 'main');
+            }
+          }
+        }
         for (const ef of this.slashEffects) { ef.timer += dt; }
         this.slashEffects = this.slashEffects.filter(ef => ef.timer < ef.duration);
 
-        // 生怪：未清關 且 本關還有額度才生
+      // Level completion check.
         if (!this.isLevelClear && this.enemiesSpawnedThisLevel < this.enemiesToSpawnThisLevel) {
           this.spawnTimer += delta;
           const spawnInterval = spawnIntervalForLevel(this.currentLevel) * this.debugSpawnMultiplier;
@@ -1204,7 +1886,7 @@ function speedMultiplierForLevel(level) {
           }
         }
 
-        // 清關判定：全部怪已生成 且 畫面上沒有存活怪物
+      // Spawn wave complete, then clear the level.
         if (!this.isLevelClear && this.enemiesSpawnedThisLevel >= this.enemiesToSpawnThisLevel) {
           const anyAlive = this.enemies.some(e => !e.isDead);
           if (!anyAlive) {
@@ -1215,6 +1897,8 @@ function speedMultiplierForLevel(level) {
       for (const enemy of this.enemies) {
         enemy.update(dt);
       }
+
+      this.updatePassiveWeapon(dt);
 
       for (const projectile of this.projectiles) {
         projectile.update(dt);
@@ -1229,6 +1913,13 @@ function speedMultiplierForLevel(level) {
         const progress = popup.timer / popup.duration;
         popup.text.setAlpha(1 - progress);
         popup.text.setPosition(popup.x, popup.y - progress * 22);
+      }
+
+      for (const popup of this.damagePopups) {
+        popup.timer += dt;
+        const progress = popup.timer / popup.duration;
+        popup.text.setAlpha(1 - progress);
+        popup.text.setPosition(popup.x, popup.y - progress * 30);
       }
 
       const DEATH_DISPLAY_DURATION = 0.5;
@@ -1253,7 +1944,7 @@ function speedMultiplierForLevel(level) {
 
         const aliveProjectiles = [];
           for (const projectile of this.projectiles) {
-            // 飛出上/左/右邊界 → miss，移除
+            // Offscreen projectiles count as misses.
             if (projectile.offscreen()) {
               if (!projectile.hasHit) {
                 this.comboCount = 0;
@@ -1263,15 +1954,20 @@ function speedMultiplierForLevel(level) {
               continue;
             }
 
-            // ⚠️ bomb 判定必須在 landed guard 之前，否則永遠跑不到
-            if (projectile.weaponType === 'bomb' && projectile.height <= 0) {
+            // Sub weapon landed guard.
+            if (projectile.weaponType === 'sub' && projectile.height <= 0) {
               if (!projectile.landedHitApplied) {
-                const { x: gx, y: gy } = projectile.groundPos();
-                const bombDamage = (projectile.weapon.damage + (projectile.perfect ? PERFECT_DAMAGE_BONUS : 0)) * (projectile.speedDamageMultiplier || 1);
+                // Use the forced landing position when present.
+                const rawPos = projectile.groundPos();
+                const gx = projectile.forcedLandX ?? rawPos.x;
+                const gy = projectile.forcedLandY ?? rawPos.y;
+                const bombDamage = projectile.weapon.damage * (1 + this.subDamageBonus);
                 const bombHitCount = this.applyBombDamage(gx, gy, projectile.weapon.landingExplosionRadius, bombDamage, projectile.perfect);
-                this.bombExplosionEffects.push({ x: gx, y: gy, timer: 0, duration: 0.45, radius: projectile.weapon.landingExplosionRadius * (this.bombRadiusMultiplier || 1) });
+                this.applySubGravityPull(gx, gy, projectile.weapon.landingExplosionRadius);
+                this.playSfx('explosion');
+                this.bombExplosionEffects.push({ x: gx, y: gy, timer: 0, duration: 0.45, radius: projectile.weapon.landingExplosionRadius * (1 + this.subRangeBonus) });
                 projectile.landedHitApplied = true;
-                // bomb 沒打到任何人 → miss
+                // Bomb miss check.
                 if (bombHitCount === 0) {
                   this.comboCount = 0;
                   this.addHitGaugePenalty();
@@ -1281,7 +1977,7 @@ function speedMultiplierForLevel(level) {
               continue;
             }
 
-            // 落地（非 bomb）→ 記 miss 一次，但留在畫面
+            // Landed projectiles can still count as misses.
             if (projectile.landed) {
               if (!projectile.landedMissApplied && !projectile.hasHit) {
                 projectile.landedMissApplied = true;
@@ -1294,8 +1990,8 @@ function speedMultiplierForLevel(level) {
               }
             }
 
-        if (projectile.weaponType === 'normal' || projectile.weaponType === 'twin') {
-          const hitRadius = projectile.weapon.straightHitRadius;
+        if (projectile.weaponType === 'main') {
+          const hitRadius = projectile.weapon.hitRadius ?? projectile.weapon.straightHitRadius;
           const x1 = projectile.prevGroundX;
           const y1 = projectile.prevGroundY;
           const x2 = projectile.groundX;
@@ -1303,14 +1999,18 @@ function speedMultiplierForLevel(level) {
           let hitIndex = -1;
           for (let i = 0; i < this.enemies.length; i += 1) {
             const enemy = this.enemies[i];
+            if (enemy.isDead) continue;
             if (distancePointToSegment(enemy.x, enemy.y, x1, y1, x2, y2) <= hitRadius + enemy.displayedRadius()) {
               hitIndex = i;
               break;
             }
             }
             if (hitIndex !== -1) {
-              const hitDamage = (projectile.weapon.damage + (projectile.perfect ? PERFECT_DAMAGE_BONUS : 0)) * (projectile.speedDamageMultiplier || 1);
-              this.applyDamageToEnemy(hitIndex, hitDamage, projectile.perfect);
+              const hitDamage = projectile.weapon.damage * (1 + this.mainDamageBonus) * projectile.damageMultiplier;
+              const killed = this.applyDamageToEnemy(hitIndex, hitDamage, projectile.perfect);
+              if (!killed && this.mainKnockbackLevel > 0) {
+                this.applyMainKnockback(this.enemies[hitIndex]);
+              }
               projectile.hasHit = true;
               projectile.destroy();
               continue;
@@ -1321,9 +2021,28 @@ function speedMultiplierForLevel(level) {
       }
       this.projectiles = aliveProjectiles;
       this.landingEffects = this.landingEffects.filter((effect) => effect.timer < effect.duration);
-      // bomb 爆炸 timer
+      // Bomb explosion timers.
       for (const ef of this.bombExplosionEffects) { ef.timer += dt; }
       this.bombExplosionEffects = this.bombExplosionEffects.filter(ef => ef.timer < ef.duration);
+      for (const effect of this.passiveWeaponEffects) { effect.timer += dt; }
+      this.passiveWeaponEffects = this.passiveWeaponEffects.filter((effect) => effect.timer < effect.duration);
+      // Health pot cleanup.
+      this.healthPotGfx.clear();
+      const alivePots = [];
+      for (const pot of this.healthPots) {
+        pot.timer += dt;
+        if (pot.timer >= pot.duration) {
+          pot.label.destroy();
+          continue;
+        }
+        // Health pot fades near expiry.
+        const remaining = pot.duration - pot.timer;
+        const alpha = remaining < 1 ? Math.sin(pot.timer * 10) * 0.5 + 0.5 : 1;
+        pot.label.setAlpha(alpha);
+        alivePots.push(pot);
+      }
+      this.healthPots = alivePots;
+
       const alivePopups = [];
       for (const popup of this.perfectPopups) {
         if (popup.timer < popup.duration) {
@@ -1333,6 +2052,16 @@ function speedMultiplierForLevel(level) {
         }
       }
       this.perfectPopups = alivePopups;
+
+      const aliveDmgPopups = [];
+      for (const popup of this.damagePopups) {
+        if (popup.timer < popup.duration) {
+          aliveDmgPopups.push(popup);
+        } else {
+          popup.text.destroy();
+        }
+      }
+      this.damagePopups = aliveDmgPopups;
 
       if (this.hp <= 0) {
         this.hp = 0;
@@ -1345,7 +2074,7 @@ function speedMultiplierForLevel(level) {
 
       this.drawTerrain();
 
-      // 斬殺特效
+      // Slash effects.
       for (const ef of this.slashEffects) {
         const progress = ef.timer / ef.duration;
         const alpha = 1 - progress;
@@ -1353,6 +2082,8 @@ function speedMultiplierForLevel(level) {
         this.gfx.lineStyle(3 + (1 - progress) * 3, color, alpha);
         this.gfx.lineBetween(ef.x1, ef.y1, ef.x2, ef.y2);
       }
+
+      this.drawPassiveWeapon();
 
       for (const enemy of this.enemies) {
         enemy.draw(this.gfx);
@@ -1366,21 +2097,21 @@ function speedMultiplierForLevel(level) {
       this.gfx.strokeCircle(effect.x, effect.y, radius);
     }
 
-    // Bomb 爆炸視覺
+      // Bomb explosion effects.
     for (const ef of this.bombExplosionEffects) {
       const progress = ef.timer / ef.duration;
       const expandRadius = ef.radius * (0.3 + progress * 0.7);
       const alpha = 1 - progress;
-      // 外圈
+      // Explosion outline.
       this.gfx.lineStyle(3, 0xffb14d, alpha);
       this.gfx.strokeCircle(ef.x, ef.y, expandRadius);
-      // 內填（早期）
+      // Inner flash.
       if (progress < 0.3) {
         this.gfx.fillStyle(0xffdd88, alpha * (1 - progress / 0.3) * 0.35);
         this.gfx.fillCircle(ef.x, ef.y, expandRadius);
       }
-      // 第二圈
-      this.gfx.lineStyle(1.5, 0xff6600, alpha * 0.6);
+        // Outer ring.
+        this.gfx.lineStyle(1.5, 0xff6600, alpha * 0.6);
       this.gfx.strokeCircle(ef.x, ef.y, expandRadius * 0.6);
     }
 
@@ -1388,7 +2119,7 @@ function speedMultiplierForLevel(level) {
         projectile.draw(this.gfx);
       }
 
-        this.drawAmmoHud();
+        this.drawSkillButtons();
         this.drawHitGauge();
         this.drawHpBar();
         this.drawCombo();

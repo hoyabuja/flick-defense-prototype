@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -30,6 +30,9 @@
     <div id="game"></div>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
     <script src="./config.js"></script>
+    <script src="./enemies_config.js"></script>
+    <script src="./weapons_config.js"></script>
+    <script src="./cards_config.js"></script>
     <script src="./game.js"></script>
 
     <script>
@@ -38,8 +41,17 @@
       }
 
       window.addEventListener('load', () => {
+        window.DEBUG_JOYSTICK = {
+          leftXMax:  typeof JOYSTICK_LEFT_X_MAX      !== 'undefined' ? JOYSTICK_LEFT_X_MAX      : 0.5,
+          mainXMin:  typeof JOYSTICK_MAIN_X_MIN      !== 'undefined' ? JOYSTICK_MAIN_X_MIN      : (typeof JOYSTICK_RIGHT_X_MIN !== 'undefined' ? JOYSTICK_RIGHT_X_MIN : 0.5),
+          rightXMin: typeof JOYSTICK_RIGHT_X_MIN     !== 'undefined' ? JOYSTICK_RIGHT_X_MIN     : (typeof JOYSTICK_MAIN_X_MIN !== 'undefined' ? JOYSTICK_MAIN_X_MIN : 0.5),
+          zoneYMin:  typeof JOYSTICK_ZONE_Y_MIN      !== 'undefined' ? JOYSTICK_ZONE_Y_MIN      : 0.72,
+          zoneYMax:  typeof JOYSTICK_ZONE_Y_MAX      !== 'undefined' ? JOYSTICK_ZONE_Y_MAX      : 1.0,
+          crystalX:  typeof JOYSTICK_CRYSTAL_X       !== 'undefined' ? JOYSTICK_CRYSTAL_X       : 0.5,
+          crystalY:  typeof JOYSTICK_CRYSTAL_Y       !== 'undefined' ? JOYSTICK_CRYSTAL_Y       : 0.88,
+        };
+
         setTimeout(() => {
-          // DEBUG_PANEL_VISIBLE 由 config.js 控制
           const panel = document.getElementById('debug-panel');
           if (typeof DEBUG_PANEL_VISIBLE !== 'undefined' && !DEBUG_PANEL_VISIBLE) {
             panel.style.display = 'none';
@@ -47,27 +59,74 @@
           }
           panel.style.display = 'block';
 
-          // 生成速度
+          const debugBody = document.getElementById('debug-body');
+          const toggleBtn = document.getElementById('debug-toggle');
+          toggleBtn.addEventListener('click', () => {
+            const collapsed = debugBody.style.display === 'none';
+            debugBody.style.display = collapsed ? 'block' : 'none';
+            toggleBtn.textContent = collapsed ? 'Hide' : 'Show';
+          });
+
+          document.querySelectorAll('.section-toggle').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const target = document.getElementById(btn.dataset.target);
+              const collapsed = target.style.display === 'none';
+              target.style.display = collapsed ? 'block' : 'none';
+              btn.textContent = collapsed ? '-' : '+';
+            });
+          });
+
+          const jsDefaults = window.DEBUG_JOYSTICK;
+          [
+            ['js-leftXMax',  jsDefaults.leftXMax],
+            ['js-rightXMin', jsDefaults.mainXMin],
+            ['js-zoneYMin',  jsDefaults.zoneYMin],
+            ['js-zoneYMax',  jsDefaults.zoneYMax],
+            ['js-crystalX',  jsDefaults.crystalX],
+            ['js-crystalY',  jsDefaults.crystalY],
+          ].forEach(([id, val]) => {
+            const el = document.getElementById(id);
+            if (el) { el.value = val; }
+            const valEl = document.getElementById(id + '-val');
+            if (valEl) valEl.textContent = parseFloat(val).toFixed(2);
+          });
+
+          const joystickMap = [
+            { id: 'js-leftXMax',  key: 'leftXMax'  },
+            { id: 'js-rightXMin', key: 'rightXMin' },
+            { id: 'js-zoneYMin',  key: 'zoneYMin'  },
+            { id: 'js-zoneYMax',  key: 'zoneYMax'  },
+            { id: 'js-crystalX',  key: 'crystalX'  },
+            { id: 'js-crystalY',  key: 'crystalY'  },
+          ];
+          joystickMap.forEach(({ id, key }) => {
+            const slider = document.getElementById(id);
+            if (!slider) return;
+            const valEl = document.getElementById(id + '-val');
+            slider.addEventListener('input', function() {
+              const v = parseFloat(this.value);
+              window.DEBUG_JOYSTICK[key] = v;
+              if (valEl) valEl.textContent = v.toFixed(2);
+            });
+          });
+
           document.getElementById('spawn-slider').addEventListener('input', function() {
             document.getElementById('spawn-val').textContent = this.value + 'x';
             const scene = getScene();
             if (scene) scene.debugSpawnMultiplier = parseFloat(this.value);
           });
 
-          // 移動速度
           document.getElementById('speed-slider').addEventListener('input', function() {
             document.getElementById('speed-val').textContent = this.value + 'x';
             const scene = getScene();
             if (scene) scene.debugSpeedMultiplier = parseFloat(this.value);
           });
 
-          // 無敵模式
           document.getElementById('godmode').addEventListener('change', function() {
             const scene = getScene();
             if (scene) scene.debugGodMode = this.checked;
           });
 
-          // 怪物類型
           const typeCheckboxes = document.querySelectorAll('.type-check');
           function updateAllowedTypes() {
             const scene = getScene();
@@ -77,7 +136,6 @@
           }
           typeCheckboxes.forEach(cb => cb.addEventListener('change', updateAllowedTypes));
 
-          // 關卡前進後退
           document.getElementById('level-next').addEventListener('click', () => {
             const scene = getScene();
             if (scene) { scene.debugLevelAdvance(); document.getElementById('level-display').textContent = scene.currentLevel; }
@@ -87,7 +145,6 @@
             if (scene) { scene.debugLevelRetreat(); document.getElementById('level-display').textContent = scene.currentLevel; }
           });
 
-          // 卡片套用
           document.getElementById('card-apply').addEventListener('click', () => {
             const scene = getScene();
             if (!scene) return;
@@ -95,11 +152,71 @@
             checked.forEach(id => scene.applyCardById(id));
           });
 
-          // 定期更新關卡顯示
           setInterval(() => {
             const scene = getScene();
             if (scene) document.getElementById('level-display').textContent = scene.currentLevel;
           }, 500);
+
+          // Card Upgrades section
+          const UPG_BONUS_FIELDS = [
+            'mainDamageBonus', 'mainFireRateBonus',
+            'subDamageBonus', 'subCooldownBonus', 'subRangeBonus',
+            'passiveDamageBonus', 'passiveFireRateBonus',
+          ];
+          const UPG_LEVEL_FIELDS = [
+            'mainKnockbackLevel', 'subPullLevel', 'mainMultishotLevel', 'mainPowerShotLevel', 'passiveMultitargetLevel',
+          ];
+          const ALL_UPG_FIELDS = [...UPG_BONUS_FIELDS, ...UPG_LEVEL_FIELDS];
+
+          function refreshUpgradeDisplay() {
+            const scene = getScene();
+            for (const field of ALL_UPG_FIELDS) {
+              const el = document.getElementById('upg-' + field);
+              if (!el) continue;
+              if (!scene) { el.textContent = '—'; continue; }
+              const v = scene[field] ?? 0;
+              el.textContent = UPG_BONUS_FIELDS.includes(field)
+                ? (v * 100).toFixed(0) + '%'
+                : String(v);
+            }
+          }
+
+          // Sync data-max attributes from JS config constants so HTML never goes stale.
+          const BTN_CONFIG_MAX = {
+            passiveMultitargetLevel: () => PASSIVE_MULTITARGET_CONFIG.maxLevel,
+            mainKnockbackLevel:      () => MAIN_KNOCKBACK_CONFIG.maxLevel,
+            subPullLevel:            () => SUB_PULL_CONFIG.maxLevel,
+            mainMultishotLevel:      () => MAIN_MULTISHOT_CONFIG.maxLevel,
+            mainPowerShotLevel:      () => MAIN_POWER_SHOT_CONFIG.maxLevel,
+          };
+          document.querySelectorAll('.upg-btn').forEach(btn => {
+            const resolver = BTN_CONFIG_MAX[btn.dataset.field];
+            if (resolver) btn.dataset.max = resolver();
+          });
+
+          document.querySelectorAll('.upg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const scene = getScene();
+              if (!scene) return;
+              const field = btn.dataset.field;
+              const step = parseFloat(btn.dataset.step);
+              const max = btn.dataset.max !== undefined ? parseFloat(btn.dataset.max) : Infinity;
+              scene[field] = Math.min((scene[field] ?? 0) + step, max);
+              refreshUpgradeDisplay();
+            });
+          });
+
+          document.getElementById('upg-reset').addEventListener('click', () => {
+            const scene = getScene();
+            if (!scene) return;
+            for (const f of UPG_BONUS_FIELDS) scene[f] = 0;
+            for (const f of UPG_LEVEL_FIELDS) scene[f] = 0;
+            scene.passiveMultitargetBonus = 0;
+            if ('mainShotCounter' in scene) scene.mainShotCounter = 0;
+            refreshUpgradeDisplay();
+          });
+
+          setInterval(refreshUpgradeDisplay, 500);
 
         }, 1500);
       });
@@ -127,45 +244,132 @@
       #debug-panel button { margin: 2px; padding: 3px 10px; font-size: 13px; cursor: pointer; }
       .card-section { margin-top: 8px; }
       .card-section label { margin-bottom: 2px; }
+      .dbg-section-hd {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin: 8px 0 4px;
+        border-top: 1px solid rgba(255,255,255,0.15);
+        padding-top: 6px;
+      }
+      .dbg-section-hd:first-child { border-top: none; padding-top: 0; }
+      .section-toggle {
+        padding: 0 6px;
+        font-size: 14px;
+        background: transparent;
+        color: #fff;
+        border: none;
+        cursor: pointer;
+      }
+      .upg-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 3px;
+      }
+      .upg-row span {
+        min-width: 32px;
+        text-align: right;
+        color: #ffe066;
+        font-size: 12px;
+      }
     </style>
 
     <div id="debug-panel">
-      <b>DEBUG</b><br><br>
-
-      <b>關卡</b><br>
-      <button id="level-prev">◀ 上一關</button>
-      <span id="level-display">1</span>
-      <button id="level-next">下一關 ▶</button>
-      <br><br>
-
-      <label>生成速度: <span id="spawn-val">1x</span></label>
-      <input id="spawn-slider" type="range" min="0.3" max="2" step="0.1" value="1">
-      <label>移動速度: <span id="speed-val">1x</span></label>
-      <input id="speed-slider" type="range" min="0.3" max="3" step="0.1" value="1">
-      <label><input id="godmode" type="checkbox"> 無敵模式</label>
-      <br>
-
-      <b>怪物類型</b><br>
-      <label><input class="type-check" type="checkbox" value="normal" checked> Normal</label>
-      <label><input class="type-check" type="checkbox" value="fast" checked> Fast</label>
-      <label><input class="type-check" type="checkbox" value="tank" checked> Tank (Shroom)</label>
-      <label><input class="type-check" type="checkbox" value="zigzag" checked> Zigzag</label>
-      <br>
-
-      <b>卡片套用</b>
-      <div class="card-section">
-        <label><input class="card-check" type="checkbox" value="ammo_normal"> 主武器彈藥 +1</label>
-        <label><input class="card-check" type="checkbox" value="ammo_twin"> Twin 彈藥 +1</label>
-        <label><input class="card-check" type="checkbox" value="ammo_bomb"> Bomb 彈藥 +1</label>
-        <label><input class="card-check" type="checkbox" value="recharge_normal"> 主武器回復 +15%</label>
-        <label><input class="card-check" type="checkbox" value="recharge_twin"> Twin 回復 +15%</label>
-        <label><input class="card-check" type="checkbox" value="recharge_all"> 全武器回復 +8%</label>
-        <label><input class="card-check" type="checkbox" value="hp_up"> 晶核 HP +1</label>
-        <label><input class="card-check" type="checkbox" value="bomb_radius"> Bomb 範圍 +20%</label>
-        <label><input class="card-check" type="checkbox" value="unlock_twin"> 解鎖 Twin</label>
-        <label><input class="card-check" type="checkbox" value="unlock_bomb"> 解鎖 Bomb</label>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <b>DEBUG</b>
+        <button id="debug-toggle" style="padding:2px 8px; font-size:12px; cursor:pointer;">Hide</button>
       </div>
-      <button id="card-apply">套用勾選卡片</button>
+      <div id="debug-body">
+
+        <div class="dbg-section-hd">
+          <b>Joystick</b>
+          <button class="section-toggle" data-target="sec-joystick">-</button>
+        </div>
+        <div id="sec-joystick">
+          <label>Left zone X: <span id="js-leftXMax-val">0.50</span></label>
+          <input id="js-leftXMax" type="range" min="0" max="1" step="0.01" value="0.5">
+          <label>Main zone X: <span id="js-rightXMin-val">0.50</span></label>
+          <input id="js-rightXMin" type="range" min="0" max="1" step="0.01" value="0.5">
+          <label>Zone min Y: <span id="js-zoneYMin-val">0.72</span></label>
+          <input id="js-zoneYMin" type="range" min="0" max="1" step="0.01" value="0.72">
+          <label>Zone max Y: <span id="js-zoneYMax-val">1.00</span></label>
+          <input id="js-zoneYMax" type="range" min="0" max="1" step="0.01" value="1.0">
+          <label>Crystal X: <span id="js-crystalX-val">0.50</span></label>
+          <input id="js-crystalX" type="range" min="0" max="1" step="0.01" value="0.5">
+          <label>Crystal Y: <span id="js-crystalY-val">0.88</span></label>
+          <input id="js-crystalY" type="range" min="0" max="1" step="0.01" value="0.88">
+        </div>
+
+        <div class="dbg-section-hd">
+          <b>Level & Spawn</b>
+          <button class="section-toggle" data-target="sec-level">-</button>
+        </div>
+        <div id="sec-level">
+          <button id="level-prev">Level -</button>
+          <span id="level-display">1</span>
+          <button id="level-next">Level +</button>
+          <br><br>
+          <label>Spawn rate: <span id="spawn-val">1x</span></label>
+          <input id="spawn-slider" type="range" min="0.3" max="2" step="0.1" value="1">
+          <label>Enemy speed: <span id="speed-val">1x</span></label>
+          <input id="speed-slider" type="range" min="0.3" max="3" step="0.1" value="1">
+          <label><input id="godmode" type="checkbox"> God mode</label>
+          <br>
+        </div>
+
+        <div class="dbg-section-hd">
+          <b>Enemy Types</b>
+          <button class="section-toggle" data-target="sec-types">-</button>
+        </div>
+        <div id="sec-types">
+          <label><input class="type-check" type="checkbox" value="normal" checked> Normal</label>
+          <label><input class="type-check" type="checkbox" value="fast" checked> Fast</label>
+          <label><input class="type-check" type="checkbox" value="tank" checked> Tank (Shroom)</label>
+          <label><input class="type-check" type="checkbox" value="zigzag" checked> Zigzag</label>
+          <br>
+        </div>
+
+        <div class="dbg-section-hd">
+          <b>Cards</b>
+          <button class="section-toggle" data-target="sec-cards">-</button>
+        </div>
+        <div id="sec-cards">
+          <div class="card-section">
+            <label><input class="card-check" type="checkbox" value="cd_bomb"> Sub CD -20%</label>
+            <label><input class="card-check" type="checkbox" value="cd_all"> All Skill CD -10%</label>
+            <label><input class="card-check" type="checkbox" value="hp_up"> Max HP +1</label>
+            <label><input class="card-check" type="checkbox" value="bomb_radius"> Sub Radius +20%</label>
+          </div>
+          <button id="card-apply">Apply Cards</button>
+        </div>
+
+        <div class="dbg-section-hd">
+          <b>Card Upgrades</b>
+          <button class="section-toggle" data-target="sec-upgrades">-</button>
+        </div>
+        <div id="sec-upgrades">
+          <div style="font-size:11px;color:#aaa;margin-bottom:4px;">Basic Bonuses</div>
+          <div class="upg-row"><button class="upg-btn" data-field="mainDamageBonus" data-step="0.05">Main Dmg +5%</button> <span id="upg-mainDamageBonus">0%</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="mainFireRateBonus" data-step="0.05">Main Rate +5%</button> <span id="upg-mainFireRateBonus">0%</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="subDamageBonus" data-step="0.05">Sub Dmg +5%</button> <span id="upg-subDamageBonus">0%</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="subCooldownBonus" data-step="0.05">Sub CD +5%</button> <span id="upg-subCooldownBonus">0%</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="subRangeBonus" data-step="0.05">Sub Range +5%</button> <span id="upg-subRangeBonus">0%</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="passiveDamageBonus" data-step="0.05">Pass Dmg +5%</button> <span id="upg-passiveDamageBonus">0%</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="passiveFireRateBonus" data-step="0.05">Pass Rate +5%</button> <span id="upg-passiveFireRateBonus">0%</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="passiveMultitargetLevel" data-step="1" data-max="3">Pass Multi Lv+1</button> <span id="upg-passiveMultitargetLevel">0</span></div>
+          <div style="font-size:11px;color:#aaa;margin:6px 0 4px;">Special Levels</div>
+          <div class="upg-row"><button class="upg-btn" data-field="mainKnockbackLevel" data-step="1" data-max="5">Knockback Lv+1</button> <span id="upg-mainKnockbackLevel">0</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="subPullLevel" data-step="1" data-max="5">Sub Pull Lv+1</button> <span id="upg-subPullLevel">0</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="mainMultishotLevel" data-step="1" data-max="3">Multishot Lv+1</button> <span id="upg-mainMultishotLevel">0</span></div>
+          <div class="upg-row"><button class="upg-btn" data-field="mainPowerShotLevel" data-step="1" data-max="5">Power Shot Lv+1</button> <span id="upg-mainPowerShotLevel">0</span></div>
+          <br>
+          <button id="upg-reset">Reset Upgrades</button>
+        </div>
+
+      </div>
     </div>
   </body>
 </html>
+
+
