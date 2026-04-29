@@ -228,7 +228,7 @@ function speedMultiplierForLevel(level) {
             this.hopState = 'CHARGING';
             this.scene.playSfx('hop_land');
             // Apply one HP on landing hit.
-            if (!this.scene.debugGodMode) this.scene.hp -= 1;
+            if (!this.scene.debugGodMode) this.scene.hp -= (this.type.attackDamage ?? 1);
           }
         }
       }
@@ -1512,8 +1512,7 @@ function speedMultiplierForLevel(level) {
       const segW = HUD_HP_BAR_SEGMENT_W;
       const segH = HUD_HP_BAR_SEGMENT_H;
       const gap = HUD_HP_BAR_SEGMENT_GAP;
-      // HP display uses up to 10 segments.
-      const displayMax = Math.min(hp, 10);
+      const displayMax = Math.min(hp, this.maxHp ?? 10);
       for (let i = 0; i < displayMax; i++) {
         const sx = x + i * (segW + gap);
         g.fillStyle(0xdd2222, 1);
@@ -1934,7 +1933,7 @@ function speedMultiplierForLevel(level) {
           continue;
         }
         if (!enemy.inZone && enemy.bottom() >= DEFENSE_LINE_Y) {
-          if (!this.debugGodMode) this.hp -= 1;
+          if (!this.debugGodMode) this.hp -= (enemy.type.attackDamage ?? 1);
           enemy.inZone = true;
           enemy.y = DEFENSE_LINE_Y - enemy.displayedRadius();
         }
