@@ -32,8 +32,11 @@
     <script src="./config.js"></script>
     <script src="./enemies_config.js"></script>
     <script src="./weapons_config.js"></script>
+    <script src="./ui_text_config.js"></script>
     <script src="./cards_config.js"></script>
     <script src="./game.js"></script>
+    <script src="./loadout_menu.js"></script>
+    <script src="./bootstrap.js"></script>
 
     <script>
       function getScene() {
@@ -41,14 +44,21 @@
       }
 
       window.addEventListener('load', () => {
+        const viewW = typeof WIDTH !== 'undefined' ? WIDTH : 1;
+        const viewH = typeof HEIGHT !== 'undefined' ? HEIGHT : 1;
+        const normalizeX = (px) => px / viewW;
+        const normalizeY = (py) => py / viewH;
+        const denormalizeX = (nx) => nx * viewW;
+        const denormalizeY = (ny) => ny * viewH;
+
         window.DEBUG_JOYSTICK = {
           leftXMax:  typeof JOYSTICK_LEFT_X_MAX      !== 'undefined' ? JOYSTICK_LEFT_X_MAX      : 0.5,
           mainXMin:  typeof JOYSTICK_MAIN_X_MIN      !== 'undefined' ? JOYSTICK_MAIN_X_MIN      : (typeof JOYSTICK_RIGHT_X_MIN !== 'undefined' ? JOYSTICK_RIGHT_X_MIN : 0.5),
           rightXMin: typeof JOYSTICK_RIGHT_X_MIN     !== 'undefined' ? JOYSTICK_RIGHT_X_MIN     : (typeof JOYSTICK_MAIN_X_MIN !== 'undefined' ? JOYSTICK_MAIN_X_MIN : 0.5),
           zoneYMin:  typeof JOYSTICK_ZONE_Y_MIN      !== 'undefined' ? JOYSTICK_ZONE_Y_MIN      : 0.72,
           zoneYMax:  typeof JOYSTICK_ZONE_Y_MAX      !== 'undefined' ? JOYSTICK_ZONE_Y_MAX      : 1.0,
-          crystalX:  typeof JOYSTICK_CRYSTAL_X       !== 'undefined' ? JOYSTICK_CRYSTAL_X       : 0.5,
-          crystalY:  typeof JOYSTICK_CRYSTAL_Y       !== 'undefined' ? JOYSTICK_CRYSTAL_Y       : 0.88,
+          crystalX:  typeof DEFENSE_LAYOUT_CONFIG !== 'undefined' ? normalizeX(DEFENSE_LAYOUT_CONFIG.crystalTargetX) : 0.5,
+          crystalY:  typeof DEFENSE_LAYOUT_CONFIG !== 'undefined' ? normalizeY(DEFENSE_LAYOUT_CONFIG.crystalTargetY) : 0.88,
         };
 
         setTimeout(() => {
@@ -107,6 +117,11 @@
               const v = parseFloat(this.value);
               window.DEBUG_JOYSTICK[key] = v;
               if (valEl) valEl.textContent = v.toFixed(2);
+              if (key === 'crystalX' && typeof DEFENSE_LAYOUT_CONFIG !== 'undefined') {
+                DEFENSE_LAYOUT_CONFIG.crystalTargetX = denormalizeX(v);
+              } else if (key === 'crystalY' && typeof DEFENSE_LAYOUT_CONFIG !== 'undefined') {
+                DEFENSE_LAYOUT_CONFIG.crystalTargetY = denormalizeY(v);
+              }
             });
           });
 
@@ -135,6 +150,13 @@
             scene.debugAllowedTypes = checked.length === 4 || checked.length === 0 ? null : checked;
           }
           typeCheckboxes.forEach(cb => cb.addEventListener('change', updateAllowedTypes));
+
+          document.querySelectorAll('.main-weapon-radio').forEach(radio => {
+            radio.addEventListener('change', function() {
+              const scene = getScene();
+              if (scene && this.checked) scene.selectedTowerWeaponTypes.center = this.value;
+            });
+          });
 
           document.getElementById('level-next').addEventListener('click', () => {
             const scene = getScene();
@@ -331,6 +353,17 @@
         </div>
 
         <div class="dbg-section-hd">
+          <b>Main Weapon</b>
+          <button class="section-toggle" data-target="sec-main-weapon">-</button>
+        </div>
+        <div id="sec-main-weapon">
+          <label><input class="main-weapon-radio" type="radio" name="main-weapon-type" value="standard" checked> Standard</label>
+          <label><input class="main-weapon-radio" type="radio" name="main-weapon-type" value="wide"> Wide</label>
+          <label><input class="main-weapon-radio" type="radio" name="main-weapon-type" value="pierce"> Pierce</label>
+          <br>
+        </div>
+
+        <div class="dbg-section-hd">
           <b>Cards</b>
           <button class="section-toggle" data-target="sec-cards">-</button>
         </div>
@@ -371,5 +404,3 @@
     </div>
   </body>
 </html>
-
-
