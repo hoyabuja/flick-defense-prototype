@@ -125,11 +125,12 @@ const JOYSTICK_LEFT_LAUNCH_Y = 0.75;
 const JOYSTICK_MAIN_LAUNCH_X = 0.5;
 const JOYSTICK_MAIN_LAUNCH_Y = 0.75;
 const JOYSTICK_MAIN_AIM_EXTEND = 300;
+const LEFT_TOWER_AUTO_FIRE_ENABLED = true;
 
 // ============================================================
 // DEBUG
 // ============================================================
-const DEBUG_PANEL_VISIBLE = false;
+const DEBUG_PANEL_VISIBLE = true;
 
 // ============================================================
 // HIT GAUGE

@@ -108,6 +108,8 @@ const TOWER_WEAPON_TYPES = {
       mode:                         'arcing_projectile',
       visualKey:                    'bomb',
       cooldownSeconds:              3.5,
+      autoClusterRadius:            68,
+      autoMinClusterSize:           2,
       damage:                       2,
       projectileRadius:             1,
       hitRadius:                    1,

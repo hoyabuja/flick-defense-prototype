@@ -1206,20 +1206,6 @@ if (typeof DEFENSE_LAYOUT_CONFIG !== 'undefined' && typeof HEIGHT !== 'undefined
 
       const zones = this.getTouchZoneBounds();
 
-      if (pointer.x < zones.leftXMax && pointer.y >= zones.zoneYMin && pointer.y <= zones.zoneYMax) {
-        if (!this.canAcceptGameplayPointer(pointer.id) || this.joystickLeft) return;
-        this.registerGameplayPointer(pointer.id);
-        this.joystickLeft = {
-          pointerId: pointer.id,
-          startX: pointer.x,
-          startY: pointer.y,
-          currentX: pointer.x,
-          currentY: pointer.y,
-          startTime: this.time.now / 1000,
-        };
-        return;
-      }
-
       if (pointer.x >= zones.mainXMin && pointer.x < zones.mainXMax && pointer.y >= zones.zoneYMin && pointer.y <= zones.zoneYMax) {
         if (!this.canAcceptGameplayPointer(pointer.id) || this.joystickMain) return;
         this.registerGameplayPointer(pointer.id);
@@ -1261,11 +1247,6 @@ if (typeof DEFENSE_LAYOUT_CONFIG !== 'undefined' && typeof HEIGHT !== 'undefined
       if (this.joystickMain && this.joystickMain.pointerId === pointer.id) {
         this.joystickMain.currentPointerX = pointer.x;
         this.joystickMain.currentPointerY = pointer.y;
-        return;
-      }
-      if (this.joystickLeft && this.joystickLeft.pointerId === pointer.id) {
-        this.joystickLeft.currentX = pointer.x;
-        this.joystickLeft.currentY = pointer.y;
         return;
       }
       if (this.rightTowerInput && this.rightTowerInput.pointerId === pointer.id) {
@@ -1339,46 +1320,6 @@ if (typeof DEFENSE_LAYOUT_CONFIG !== 'undefined' && typeof HEIGHT !== 'undefined
     if (this.joystickMain && this.joystickMain.pointerId === pointerId) {
       this.joystickMain = null;
       handled = true;
-    }
-
-    if (this.joystickLeft && this.joystickLeft.pointerId === pointerId) {
-      const js = this.joystickLeft;
-      this.joystickLeft = null;
-      handled = true;
-      if (!isCancel && !this.gameOver && !this.isLevelClear && !this.isCardPicking) {
-        const dragDist = Math.hypot(pointer.x - js.startX, pointer.y - js.startY);
-        if (dragDist >= MIN_FLICK_DISTANCE && js.targetX != null) {
-          const targetX = js.targetX;
-          const targetY = js.targetY;
-          const launchX = (window.DEBUG_JOYSTICK?.leftTowerX ?? JOYSTICK_LEFT_LAUNCH_X) * WIDTH;
-          const launchY = (window.DEBUG_JOYSTICK?.leftTowerY ?? JOYSTICK_LEFT_LAUNCH_Y) * HEIGHT;
-          const dx = targetX - launchX;
-          const dy = targetY - launchY;
-          const dist = Math.hypot(dx, dy);
-          const dirX = dx / dist;
-          const dirY = dy / dist;
-          const leftConfig = this.getCurrentTowerWeaponConfig('left');
-          const vz0 = leftConfig.arcMinUpwardSpeed;
-          const flightTime = (2 * vz0) / leftConfig.arcGravity;
-          const gestureSpeed = Phaser.Math.Clamp(
-            dist / (flightTime * HORIZONTAL_SPEED_MULTIPLIER),
-            MIN_HORIZONTAL_SPEED, MAX_HORIZONTAL_SPEED
-          );
-          const isPerfect = gestureSpeed >= PERFECT_RELEASE_SPEED_MIN && gestureSpeed <= PERFECT_RELEASE_SPEED_MAX;
-          this.spawnWeaponProjectiles(launchX, launchY, dirX, dirY, gestureSpeed, isPerfect, 'left');
-          const lastProj = this.projectiles[this.projectiles.length - 1];
-          if (lastProj && lastProj.weapon?.mode === 'arcing_projectile') {
-            lastProj.forcedLandX = targetX;
-            lastProj.forcedLandY = targetY;
-            lastProj.forcedStartX = launchX;
-            lastProj.forcedStartY = launchY;
-            const dist = Math.hypot(targetX - launchX, targetY - launchY);
-            lastProj.forcedFlightTime = Phaser.Math.Clamp(dist / 400, 0.4, 1.8);
-            lastProj.forcedArcHeight = Math.min(dist * 0.3, 150);
-            lastProj.flightTimer = 0;
-          }
-        }
-      }
     }
 
     if (handled || this.isRegisteredGameplayPointer(pointerId)) {
@@ -1930,6 +1871,119 @@ if (typeof DEFENSE_LAYOUT_CONFIG !== 'undefined' && typeof HEIGHT !== 'undefined
         ? (PIERCE_BEAM_CONFIG.fireIntervalSeconds ?? NORMAL_FIRE_RATE)
         : NORMAL_FIRE_RATE;
       return baseInterval / (1 + this.mainFireRateBonus);
+    }
+
+    getLeftTowerPosition() {
+      return {
+        x: (window.DEBUG_JOYSTICK?.leftTowerX ?? JOYSTICK_LEFT_LAUNCH_X) * WIDTH,
+        y: (window.DEBUG_JOYSTICK?.leftTowerY ?? JOYSTICK_LEFT_LAUNCH_Y) * HEIGHT,
+      };
+    }
+
+    selectLeftAutoTarget(weaponConfig) {
+      const clusterRadius = weaponConfig?.autoClusterRadius ?? weaponConfig?.landingExplosionRadius ?? LANDING_HIT_RADIUS;
+      const minClusterSize = Math.max(1, weaponConfig?.autoMinClusterSize ?? 1);
+      const towerPos = this.getLeftTowerPosition();
+      const candidates = this.enemies.filter((enemy) => {
+        if (!enemy || enemy.isDead) return false;
+        const bounds = battlefieldBoundsAtY(enemy.y);
+        return enemy.x >= bounds.left && enemy.x <= bounds.right
+          && enemy.y >= FAR_BATTLEFIELD_Y && enemy.y <= DEFENSE_LINE_Y;
+      });
+      if (candidates.length === 0) return null;
+
+      let bestTarget = null;
+      for (const seed of candidates) {
+        let sumX = 0;
+        let sumY = 0;
+        let count = 0;
+        for (const enemy of candidates) {
+          if (Phaser.Math.Distance.Between(seed.x, seed.y, enemy.x, enemy.y) <= clusterRadius) {
+            sumX += enemy.x;
+            sumY += enemy.y;
+            count += 1;
+          }
+        }
+        if (count < minClusterSize && candidates.length > 1) continue;
+        const targetX = sumX / count;
+        const targetY = sumY / count;
+        const towerDistance = Phaser.Math.Distance.Between(towerPos.x, towerPos.y, targetX, targetY);
+        if (!bestTarget
+          || towerDistance < bestTarget.towerDistance
+          || (Math.abs(towerDistance - bestTarget.towerDistance) < 0.0001 && count > bestTarget.count)
+          || (count === bestTarget.count && Math.abs(towerDistance - bestTarget.towerDistance) < 0.0001 && targetY > bestTarget.y)) {
+          bestTarget = {
+            x: targetX,
+            y: targetY,
+            count,
+            towerDistance,
+          };
+        }
+      }
+
+      if (!bestTarget) {
+        const nearestEnemy = candidates.reduce((best, enemy) => {
+          const towerDistance = Phaser.Math.Distance.Between(towerPos.x, towerPos.y, enemy.x, enemy.y);
+          if (!best || towerDistance < best.towerDistance) {
+            return { x: enemy.x, y: enemy.y, towerDistance };
+          }
+          return best;
+        }, null);
+        return nearestEnemy ? { x: nearestEnemy.x, y: nearestEnemy.y } : null;
+      }
+
+      const bounds = battlefieldBoundsAtY(bestTarget.y);
+      return {
+        x: Phaser.Math.Clamp(bestTarget.x, bounds.left, bounds.right),
+        y: Phaser.Math.Clamp(bestTarget.y, FAR_BATTLEFIELD_Y, DEFENSE_LINE_Y),
+      };
+    }
+
+    fireLeftTowerAutoBomb(targetX, targetY) {
+      const leftConfig = this.getCurrentTowerWeaponConfig('left');
+      if (!leftConfig || leftConfig.mode !== 'arcing_projectile') return false;
+
+      const launchPos = this.getLeftTowerPosition();
+      const dx = targetX - launchPos.x;
+      const dy = targetY - launchPos.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist <= 0.0001) return false;
+
+      const dirX = dx / dist;
+      const dirY = dy / dist;
+      const flightTime = (2 * leftConfig.arcMinUpwardSpeed) / leftConfig.arcGravity;
+      const gestureSpeed = Phaser.Math.Clamp(
+        dist / (flightTime * HORIZONTAL_SPEED_MULTIPLIER),
+        MIN_HORIZONTAL_SPEED,
+        MAX_HORIZONTAL_SPEED,
+      );
+
+      this.spawnWeaponProjectiles(launchPos.x, launchPos.y, dirX, dirY, gestureSpeed, false, 'left');
+      const lastProj = this.projectiles[this.projectiles.length - 1];
+      if (!lastProj || lastProj.weapon?.mode !== 'arcing_projectile') {
+        return false;
+      }
+
+      lastProj.forcedLandX = targetX;
+      lastProj.forcedLandY = targetY;
+      lastProj.forcedStartX = launchPos.x;
+      lastProj.forcedStartY = launchPos.y;
+      lastProj.forcedFlightTime = Phaser.Math.Clamp(dist / 400, 0.4, 1.8);
+      lastProj.forcedArcHeight = Math.min(dist * 0.3, 150);
+      lastProj.flightTimer = 0;
+      return true;
+    }
+
+    updateLeftAutoFire() {
+      if (!LEFT_TOWER_AUTO_FIRE_ENABLED) return;
+      const leftConfig = this.getCurrentTowerWeaponConfig('left');
+      if (!leftConfig || leftConfig.mode !== 'arcing_projectile') return;
+      const cooldown = this.skillCooldowns?.left;
+      if (cooldown && cooldown.current > 0) return;
+
+      const target = this.selectLeftAutoTarget(leftConfig);
+      if (!target) return;
+      this.fireLeftTowerAutoBomb(target.x, target.y);
     }
 
     getSatelliteBeamOrigin() {
@@ -2990,14 +3044,10 @@ if (typeof DEFENSE_LAYOUT_CONFIG !== 'undefined' && typeof HEIGHT !== 'undefined
             sprite: null,
           });
 
-          enemy.hp -= hitDamage;
+          const enemyIndex = this.enemies.indexOf(enemy);
+          if (enemyIndex < 0) continue;
+          this.applyDamageToEnemy(enemyIndex, hitDamage, false);
           this.addRightUltCharge(1);
-          if (enemy.hp <= 0) {
-            enemy.isDead = true;
-            enemy.deathTimer = 0;
-            this.score += enemy.scoreValue || enemy.type.scoreValue || 1;
-            this.playSfx('enemy_death');
-          }
         }
       }
     }
@@ -3311,6 +3361,7 @@ if (typeof DEFENSE_LAYOUT_CONFIG !== 'undefined' && typeof HEIGHT !== 'undefined
         // Update level speed scaling from the current level.
         this.levelSpeedMultiplier = speedMultiplierForLevel(this.currentLevel);
         this.updateSkillCooldowns(dt);
+        this.updateLeftAutoFire();
         this.updateRightUltimateHold(delta);
         if (this.slashCooldown > 0) this.slashCooldown -= dt;
         if (this.mainBeamCooldownRemaining > 0) {
