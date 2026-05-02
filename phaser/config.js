@@ -130,7 +130,7 @@ const LEFT_TOWER_AUTO_FIRE_ENABLED = true;
 // ============================================================
 // DEBUG
 // ============================================================
-const DEBUG_PANEL_VISIBLE = true;
+const DEBUG_PANEL_VISIBLE = false;
 
 // ============================================================
 // HIT GAUGE
